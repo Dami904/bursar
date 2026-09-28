@@ -1,0 +1,6 @@
+pnpm-lock.yaml
+PLAN.md
+dist/
+coverage/
+contracts/lib/
+contracts/out/

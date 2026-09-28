@@ -1,0 +1,22 @@
+{
+  "name": "@bursar/policy",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "bursar-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "export:parity": "tsx scripts/export-parity.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15"
+  }
+}

@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: bursar
+      POSTGRES_PASSWORD: bursar
+      POSTGRES_DB: bursar
+    ports:
+      - "127.0.0.1:54330:5432"
+    volumes:
+      - bursar-pg:/var/lib/postgresql/data
+      - ./scripts/db-init.sql:/docker-entrypoint-initdb.d/db-init.sql:ro
+volumes:
+  bursar-pg:

@@ -1,0 +1,212 @@
+import { formatUsdc } from "@bursar/money";
+import {
+  agents,
+  approvals,
+  approvers,
+  auditAnchors,
+  auditChain,
+  authorizations,
+  decisions,
+  jobs,
+  payees,
+  type Db,
+} from "@bursar/db";
+import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { agentView, authorizationView, jobView } from "../http/views.js";
+import { notFound } from "../http/errors.js";
+import { getOwnedJob } from "./jobs.js";
+
+/** Everything the console reads, always scoped to the signed-in owner. */
+
+export async function listJobs(db: Db, ownerId: string) {
+  const rows = await db
+    .select()
+    .from(jobs)
+    .where(eq(jobs.ownerId, ownerId))
+    .orderBy(desc(jobs.createdAt));
+  if (rows.length === 0) return [];
+  const ids = rows.map((j) => j.id);
+  const agentCounts = await db
+    .select({ jobId: agents.jobId, n: sql<number>`count(*)::int` })
+    .from(agents)
+    .where(and(inArray(agents.jobId, ids), eq(agents.status, "ACTIVE")))
+    .groupBy(agents.jobId);
+  const waiting = await db
+    .select({ jobId: authorizations.jobId, n: sql<number>`count(*)::int` })
+    .from(authorizations)
+    .where(and(inArray(authorizations.jobId, ids), eq(authorizations.state, "PENDING_APPROVAL")))
+    .groupBy(authorizations.jobId);
+  const count = (list: { jobId: string; n: number }[], id: string) =>
+    list.find((r) => r.jobId === id)?.n ?? 0;
+  return rows.map((j) => ({
+    ...jobView(j),
+    agents: count(agentCounts, j.id),
+    needsYou: count(waiting, j.id),
+  }));
+}
+
+/** A job's decisions, newest first, each with its payment's state and the payee's label. */
+export async function jobDecisions(db: Db, ownerId: string, jobId: string, limit = 100) {
+  const job = await getOwnedJob(db, ownerId, jobId);
+  const rows = await db
+    .select({ decision: decisions, auth: authorizations, agent: agents, payee: payees })
+    .from(decisions)
+    .innerJoin(agents, eq(agents.id, decisions.agentId))
+    .leftJoin(authorizations, eq(authorizations.decisionId, decisions.id))
+    .leftJoin(payees, and(eq(payees.jobId, decisions.jobId), eq(payees.value, decisions.payee)))
+    .where(eq(decisions.jobId, job.id))
+    .orderBy(desc(decisions.createdAt))
+    .limit(limit);
+  return rows.map(({ decision: d, auth, agent, payee }) => ({
+    id: d.id,
+    at: d.createdAt.toISOString(),
+    agent: { id: agent.id, name: agent.name, role: agent.role },
+    kind: d.kind,
+    payee: d.payee,
+    payeeLabel: payee?.label ?? null,
+    invoiceRef: d.invoiceRef,
+    amount: formatUsdc(d.amount),
+    reasoning: d.reasoning,
+    result: d.result,
+    reason: d.reason,
+    /** The payment's state, or null when the decision was a denial (nothing was reserved). */
+    state: auth?.state ?? null,
+    authorizationId: auth?.id ?? null,
+    /** For purchases: the exact resource bought (the payee is only its origin). */
+    paymentUrl: auth?.paymentUrl ?? null,
+    paymentTx: auth?.paymentTx ?? null,
+  }));
+}
+
+/** Who the job may pay: x402 sellers (origins) and vendors (addresses). */
+export async function jobPayees(db: Db, ownerId: string, jobId: string) {
+  const job = await getOwnedJob(db, ownerId, jobId);
+  const rows = await db
+    .select()
+    .from(payees)
+    .where(eq(payees.jobId, job.id))
+    .orderBy(asc(payees.createdAt));
+  return rows.map((p) => ({
+    id: p.id,
+    kind: p.kind,
+    value: p.value,
+    label: p.label,
+    category: p.category,
+  }));
+}
+
+export async function jobAgents(db: Db, ownerId: string, jobId: string) {
+  const job = await getOwnedJob(db, ownerId, jobId);
+  const rows = await db
+    .select()
+    .from(agents)
+    .where(eq(agents.jobId, job.id))
+    .orderBy(asc(agents.createdAt));
+  return rows.map(agentView);
+}
+
+/** One decision's full trail: request, policy checks, approval, payment, audit log, anchor. */
+export async function decisionEvidence(db: Db, ownerId: string, decisionId: string) {
+  const [row] = await db
+    .select({ decision: decisions, job: jobs, agent: agents })
+    .from(decisions)
+    .innerJoin(jobs, eq(jobs.id, decisions.jobId))
+    .innerJoin(agents, eq(agents.id, decisions.agentId))
+    .where(and(eq(decisions.id, decisionId), eq(jobs.ownerId, ownerId)));
+  if (row === undefined) throw notFound("Decision");
+  const { decision: d, job, agent } = row;
+  const [auth] = await db.select().from(authorizations).where(eq(authorizations.decisionId, d.id));
+  const [approval] =
+    auth === undefined
+      ? []
+      : await db
+          .select({ approval: approvals, approver: approvers })
+          .from(approvals)
+          .leftJoin(approvers, eq(approvers.id, approvals.approverId))
+          .where(eq(approvals.authorizationId, auth.id));
+  const refs = auth === undefined ? [d.id] : [d.id, auth.id];
+  const entries = await db
+    .select()
+    .from(auditChain)
+    .where(inArray(auditChain.refId, refs))
+    .orderBy(asc(auditChain.seq));
+  const firstSeq = entries[0]?.seq;
+  const anchors =
+    firstSeq === undefined
+      ? []
+      : await db
+          .select()
+          .from(auditAnchors)
+          .where(and(eq(auditAnchors.status, "CONFIRMED"), gte(auditAnchors.chainSeq, firstSeq)))
+          .orderBy(asc(auditAnchors.chainSeq));
+  const lastSeq = entries.at(-1)?.seq;
+  const anchor = lastSeq === undefined ? undefined : anchors.find((a) => a.chainSeq >= lastSeq);
+  return {
+    job: { id: job.id, title: job.title },
+    agent: { id: agent.id, name: agent.name, role: agent.role },
+    decision: {
+      id: d.id,
+      at: d.createdAt.toISOString(),
+      kind: d.kind,
+      payee: d.payee,
+      invoiceRef: d.invoiceRef,
+      amount: formatUsdc(d.amount),
+      reasoning: d.reasoning,
+      result: d.result,
+      reason: d.reason,
+      checks: d.checks,
+      operationId: d.operationId,
+      policyVersion: d.policyVersion,
+    },
+    payment: auth === undefined ? null : authorizationView(auth),
+    approval:
+      approval === undefined
+        ? null
+        : {
+            verdict: approval.approval.verdict,
+            approver: approval.approver?.name ?? null,
+            approverAddress: approval.approval.approverAddress,
+            note: approval.approval.note,
+            at: approval.approval.decidedAt.toISOString(),
+          },
+    audit: entries.map((e) => ({
+      seq: e.seq,
+      event: e.event,
+      hash: e.hash,
+      prevHash: e.prevHash,
+      payloadHash: e.payloadHash,
+      payload: e.payload,
+      at: e.createdAt.toISOString(),
+    })),
+    anchor:
+      anchor === undefined
+        ? null
+        : {
+            anchorSeq: anchor.anchorSeq,
+            coversUpTo: anchor.chainSeq,
+            head: anchor.head,
+            txHash: anchor.txHash,
+            at: (anchor.confirmedAt ?? anchor.sentAt).toISOString(),
+          },
+  };
+}
+
+/**
+ * A cheap fingerprint of everything an owner can see. The live stream sends "change" whenever it
+ * moves, and the console refetches. Every decision and payment step appends to the audit log, so
+ * its head covers most changes; job counters (deposits, revenue) and agents cover the rest.
+ */
+export async function ownerFingerprint(db: Db, ownerId: string): Promise<string> {
+  const [row] = (await db.execute(sql`
+    select
+      (select coalesce(max(a.seq), 0) from audit_chain a join jobs j on j.id = a.job_id
+        where j.owner_id = ${ownerId}) as audit,
+      (select coalesce(sum(j.deposited + j.revenue_received), 0) || ':' || count(*)
+         || ':' || coalesce(string_agg(j.status::text, ',' order by j.id), '')
+         from jobs j where j.owner_id = ${ownerId}) as jobs,
+      (select count(*) || ':' || count(*) filter (where ag.status = 'REVOKED')
+         from agents ag join jobs j on j.id = ag.job_id where j.owner_id = ${ownerId}) as agents,
+      (select coalesce(max(an.anchor_seq), 0) from audit_anchors an
+        where an.status = 'CONFIRMED') as anchors`)) as unknown as Record<string, unknown>[];
+  return JSON.stringify(row ?? {});
+}

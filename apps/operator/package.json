@@ -1,0 +1,29 @@
+{
+  "name": "@bursar/operator",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
+    "@google/genai": "^2.24.0",
+    "zod": "4.6.5"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "tsx --conditions=bursar-source src/main.ts",
+    "smoke:gemini": "tsx scripts/gemini-smoke.ts",
+    "eval:models": "tsx scripts/eval-models.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15",
+    "vitest": "^5.0.2"
+  },
+  "exports": {
+    ".": {
+      "bursar-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  }
+}

@@ -1,0 +1,180 @@
+{
+  "description": "Shared policy test vectors. Amounts are micro-USDC strings. Each case deep-merges `override` into `base`. The same vectors are replayed against JobVault in Foundry (PLAN.md §8.1.7).",
+  "base": {
+    "job": {
+      "id": "job-1",
+      "status": "ACTIVE",
+      "expiresAt": "2026-10-10T00:00:00Z",
+      "budget": "1000000",
+      "deposited": "1000000",
+      "committed": "0",
+      "perTxCap": "400000",
+      "approvalThreshold": "250000",
+      "windowCap": "800000",
+      "windowSeconds": 3600,
+      "windowStart": "2026-09-28T09:30:00Z",
+      "windowSpent": "0"
+    },
+    "agent": {
+      "id": "agent-1",
+      "jobId": "job-1",
+      "status": "ACTIVE",
+      "ancestorRevoked": false,
+      "limit": null,
+      "committed": "0",
+      "ancestorLimits": []
+    },
+    "payee": { "category": "data" },
+    "categoryLimit": null,
+    "request": { "amount": "100000" },
+    "now": "2026-09-28T10:00:00Z"
+  },
+  "cases": [
+    { "name": "allows a small purchase", "override": {}, "expect": { "outcome": "ALLOWED" } },
+    {
+      "name": "allows exactly the approval threshold",
+      "override": { "request": { "amount": "250000" } },
+      "expect": { "outcome": "ALLOWED" }
+    },
+    {
+      "name": "escalates just above the approval threshold",
+      "override": { "request": { "amount": "250001" } },
+      "expect": { "outcome": "NEEDS_APPROVAL" }
+    },
+    {
+      "name": "denies a paused job",
+      "override": { "job": { "status": "PAUSED" } },
+      "expect": { "outcome": "DENIED", "reason": "JOB_NOT_ACTIVE" }
+    },
+    {
+      "name": "denies a job still waiting for the chain",
+      "override": { "job": { "status": "PENDING_CHAIN" } },
+      "expect": { "outcome": "DENIED", "reason": "JOB_NOT_ACTIVE" }
+    },
+    {
+      "name": "denies at the exact expiry instant",
+      "override": { "job": { "expiresAt": "2026-09-28T10:00:00Z" } },
+      "expect": { "outcome": "DENIED", "reason": "JOB_EXPIRED" }
+    },
+    {
+      "name": "denies an agent from another job",
+      "override": { "agent": { "jobId": "job-2" } },
+      "expect": { "outcome": "DENIED", "reason": "AGENT_NOT_IN_JOB" }
+    },
+    {
+      "name": "denies an unknown agent",
+      "override": { "agent": null },
+      "expect": { "outcome": "DENIED", "reason": "AGENT_NOT_IN_JOB" }
+    },
+    {
+      "name": "denies a revoked agent",
+      "override": { "agent": { "status": "REVOKED" } },
+      "expect": { "outcome": "DENIED", "reason": "AGENT_REVOKED" }
+    },
+    {
+      "name": "denies a sub-agent whose parent was revoked",
+      "override": { "agent": { "ancestorRevoked": true } },
+      "expect": { "outcome": "DENIED", "reason": "AGENT_REVOKED" }
+    },
+    {
+      "name": "denies a zero amount",
+      "override": { "request": { "amount": "0" } },
+      "expect": { "outcome": "DENIED", "reason": "INVALID_AMOUNT" }
+    },
+    {
+      "name": "denies a payee not on the allow-list",
+      "override": { "payee": null },
+      "expect": { "outcome": "DENIED", "reason": "PAYEE_NOT_ALLOWED" }
+    },
+    {
+      "name": "allows exactly the per-tx cap (needs approval, it's above threshold)",
+      "override": { "request": { "amount": "400000" } },
+      "expect": { "outcome": "NEEDS_APPROVAL" }
+    },
+    {
+      "name": "denies one unit over the per-tx cap",
+      "override": { "request": { "amount": "400001" } },
+      "expect": { "outcome": "DENIED", "reason": "PER_TX_CAP_EXCEEDED" }
+    },
+    {
+      "name": "denies over the agent's sub-limit",
+      "override": { "agent": { "limit": "150000", "committed": "100000" } },
+      "expect": { "outcome": "DENIED", "reason": "AGENT_LIMIT_EXCEEDED" }
+    },
+    {
+      "name": "allows exactly the agent's sub-limit",
+      "override": { "agent": { "limit": "200000", "committed": "100000" } },
+      "expect": { "outcome": "ALLOWED" }
+    },
+    {
+      "name": "denies over a parent's limit even when the helper's own limit fits",
+      "override": {
+        "agent": {
+          "limit": "200000",
+          "committed": "0",
+          "ancestorLimits": [{ "limit": "300000", "committed": "250000" }]
+        }
+      },
+      "expect": { "outcome": "DENIED", "reason": "AGENT_LIMIT_EXCEEDED" }
+    },
+    {
+      "name": "denies over a grandparent's limit",
+      "override": {
+        "agent": {
+          "ancestorLimits": [
+            { "limit": "900000", "committed": "0" },
+            { "limit": "150000", "committed": "100000" }
+          ]
+        }
+      },
+      "expect": { "outcome": "DENIED", "reason": "AGENT_LIMIT_EXCEEDED" }
+    },
+    {
+      "name": "allows exactly what the parent has left",
+      "override": {
+        "agent": { "ancestorLimits": [{ "limit": "300000", "committed": "200000" }] }
+      },
+      "expect": { "outcome": "ALLOWED" }
+    },
+    {
+      "name": "denies over the category budget",
+      "override": { "categoryLimit": { "limit": "300000", "committed": "250000" } },
+      "expect": { "outcome": "DENIED", "reason": "CATEGORY_BUDGET_EXCEEDED" }
+    },
+    {
+      "name": "allows the last unit of job budget",
+      "override": { "job": { "committed": "900000" } },
+      "expect": { "outcome": "ALLOWED" }
+    },
+    {
+      "name": "denies one unit over the job budget",
+      "override": { "job": { "committed": "900001" } },
+      "expect": { "outcome": "DENIED", "reason": "JOB_BUDGET_EXCEEDED" }
+    },
+    {
+      "name": "denies when the vault holds less than the budget",
+      "override": { "job": { "deposited": "500000", "committed": "450000" } },
+      "expect": { "outcome": "DENIED", "reason": "JOB_UNDERFUNDED" }
+    },
+    {
+      "name": "denies over the hourly window cap",
+      "override": { "job": { "windowSpent": "750000" } },
+      "expect": { "outcome": "DENIED", "reason": "RATE_LIMITED" }
+    },
+    {
+      "name": "allows again once the window has rolled over",
+      "override": { "job": { "windowSpent": "750000", "windowStart": "2026-09-28T08:59:59Z" } },
+      "expect": { "outcome": "ALLOWED" }
+    },
+    {
+      "name": "reports the first failure when several checks fail",
+      "override": { "job": { "status": "CLOSED", "committed": "1000000" }, "payee": null },
+      "expect": { "outcome": "DENIED", "reason": "JOB_NOT_ACTIVE" }
+    },
+    {
+      "name": "checks identity before revealing budget problems",
+      "override": { "agent": { "status": "REVOKED" }, "job": { "committed": "1000000" } },
+      "expect": { "outcome": "DENIED", "reason": "AGENT_REVOKED" }
+    }
+  ]
+}

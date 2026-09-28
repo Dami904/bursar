@@ -1,0 +1,36 @@
+{
+  "name": "@bursar/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "circle:register-entity-secret": "tsx scripts/register-entity-secret.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "circle:setup": "tsx scripts/circle-setup.ts",
+    "circle:probe": "tsx scripts/circle-probe.ts",
+    "start": "tsx --conditions=bursar-source src/main.ts",
+    "dev": "tsx watch --conditions=bursar-source src/main.ts",
+    "onchain:job": "tsx --conditions=bursar-source scripts/onchain-job.ts",
+    "test": "vitest run",
+    "onchain:approver": "tsx --conditions=bursar-source scripts/onchain-approver.ts",
+    "onchain:payee": "tsx --conditions=bursar-source scripts/onchain-payee.ts",
+    "dev:approve": "tsx --conditions=bursar-source scripts/approve.ts",
+    "onchain:pay": "tsx --conditions=bursar-source scripts/pay-revenue.ts"
+  },
+  "dependencies": {
+    "@bursar/db": "workspace:*",
+    "@bursar/money": "workspace:*",
+    "@bursar/operator": "workspace:*",
+    "@bursar/payments": "workspace:*",
+    "@bursar/policy": "workspace:*",
+    "@circle-fin/developer-controlled-wallets": "10.8.1",
+    "@x402/core": "2.27.0",
+    "drizzle-orm": "0.45.3",
+    "viem": "^2.56.9",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15",
+    "vitest": "^5.0.2"
+  }
+}

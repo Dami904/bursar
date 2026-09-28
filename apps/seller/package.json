@@ -1,0 +1,23 @@
+{
+  "name": "@bursar/seller",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "@x402/core": "2.27.0",
+    "@x402/evm": "2.27.0",
+    "@x402/hono": "2.27.0",
+    "hono": "^4.13.9",
+    "viem": "^2.56.9",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15"
+  },
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

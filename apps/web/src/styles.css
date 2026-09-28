@@ -1,0 +1,82 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource/newsreader/400-italic.css";
+@import "@fontsource-variable/jetbrains-mono";
+
+/* Graphite and gold (docs/DESIGN.md). Dark mode follows the system unless the user picks one. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --border: #e6e6e6;
+  --text: #111111;
+  --muted: #6e6e6e;
+  --accent: #161616;
+  --on-accent: #ffffff;
+  --seal: #b08a2e;
+  --seal-bg: #f6edd6;
+  --seal-text: #6e5516;
+  --track: #ededed;
+  --paid: #1e7f4e;
+  --held: #5b45c9;
+  --needs: #b7791f;
+  --stuck: #d2603a;
+  --blocked: #b83232;
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --bg: #0b0b0b;
+  --surface: #151515;
+  --border: #2a2a2a;
+  --text: #ededed;
+  --muted: #9a9a9a;
+  --accent: #f2f2f2;
+  --on-accent: #111111;
+  --seal: #ddb75a;
+  --seal-bg: #2f2610;
+  --seal-text: #f0d796;
+  --track: #242424;
+  --paid: #4cc38a;
+  --held: #a495f2;
+  --needs: #f0b849;
+  --stuck: #f08a63;
+  --blocked: #ee6a63;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-line: var(--border);
+  --color-ink: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
+  --color-seal: var(--seal);
+  --color-seal-bg: var(--seal-bg);
+  --color-seal-text: var(--seal-text);
+  --color-track: var(--track);
+  --color-paid: var(--paid);
+  --color-held: var(--held);
+  --color-needs: var(--needs);
+  --color-stuck: var(--stuck);
+  --color-blocked: var(--blocked);
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-voice: "Newsreader", Georgia, serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}

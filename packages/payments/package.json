@@ -1,0 +1,29 @@
+{
+  "name": "@bursar/payments",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "bursar-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./chain": {
+      "bursar-source": "./src/browser.ts",
+      "types": "./dist/browser.d.ts",
+      "default": "./dist/browser.js"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@bursar/money": "workspace:*",
+    "@circle-fin/developer-controlled-wallets": "10.8.1",
+    "@x402/core": "2.27.0",
+    "@x402/evm": "2.27.0",
+    "viem": "^2.56.9"
+  }
+}

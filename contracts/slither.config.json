@@ -1,0 +1,9 @@
+{
+  "filter_paths": "lib/|test/",
+  "exclude_dependencies": true,
+  "detectors_to_exclude": "timestamp,cyclomatic-complexity",
+  "_why_excluded": {
+    "timestamp": "Expiries, approval deadlines and rate windows are deliberately measured in chain time; a few seconds of validator drift doesn't matter at hour-long windows.",
+    "cyclomatic-complexity": "JobVault.release is the fixed-order list of policy checks, kept flat on purpose so it reads line-for-line against packages/policy."
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "@bursar/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --conditions=bursar-source src/server.ts",
+    "start": "tsx --conditions=bursar-source src/server.ts",
+    "owner:create": "tsx --conditions=bursar-source src/cli/create-owner.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "db:migrate": "pnpm --filter @bursar/db db:migrate"
+  },
+  "dependencies": {
+    "@bursar/db": "workspace:*",
+    "@bursar/money": "workspace:*",
+    "@bursar/payments": "workspace:*",
+    "@bursar/policy": "workspace:*",
+    "@hono/node-server": "^2.1.1",
+    "drizzle-orm": "0.45.3",
+    "hono": "4.13.9",
+    "postgres": "3.4.9",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@x402/core": "2.27.0",
+    "drizzle-kit": "0.31.11",
+    "tsx": "^4.23.15",
+    "viem": "^2.56.9"
+  }
+}

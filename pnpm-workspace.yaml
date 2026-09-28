@@ -1,0 +1,9 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+allowBuilds:
+  "@google/genai": false
+  # Only prints a version-check notice.
+  "@reown/appkit": false
+  esbuild: true
+  protobufjs: false
