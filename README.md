@@ -255,7 +255,7 @@ sequenceDiagram
     alt denied
         B-->>A: DENIED + reason (nothing reserved, nothing signed)
     else above the approval threshold
-        B-->>A: NEEDS_APPROVAL (held; owner signs EIP-712, or rejected after 2 h)
+        B-->>A: NEEDS_APPROVAL (held until the owner signs, or rejected after 2 h)
     else allowed or approved
         B->>V: release(job, op, amount, rules version, approval)
         V->>V: re-check rules, signature, operation id
