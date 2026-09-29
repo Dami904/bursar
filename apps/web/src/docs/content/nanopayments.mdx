@@ -42,6 +42,10 @@ On the evidence page, a nanopayment shows **Paid through Circle Gateway** with C
 - **The seller goes silent after the payment was sent.** Bursar asks Circle. If Circle received it, it's paid. If Circle has no record of it after 10 minutes, the amount goes back to the job's Gateway balance. Holding it longer would protect nothing, because the float was already counted in full.
 - **The float can't be funded.** If the job's caps or remaining budget are too small to cover the payment, it's returned to the budget with the reason, and nothing leaves the vault.
 
+## When the job closes
+
+Closing the job returns what's left in the vault, as always. The unspent float in its Gateway balance comes back too: once nothing can draw on it, the job's wallet signs a withdrawal, Circle attests it, and Bursar submits it on Arc, paying the USDC straight to the wallet that owns the job. Circle charges a flat withdrawal fee (0.0035 USDC on Arc testnet); a balance smaller than the fee is left in Gateway.
+
 ## Selling with nanopayments
 
 Any x402 seller that takes Circle Gateway works. With Circle's `@circle-fin/x402-batching` package, a seller's price is marked as Gateway-only and Bursar pays it through Gateway automatically. If a seller offers both a normal payment and Gateway for the same item, Bursar pays the normal way, straight from the vault.

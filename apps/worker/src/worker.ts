@@ -14,6 +14,7 @@ import { floatsOnce } from "./floats.js";
 import { indexOnce } from "./indexer.js";
 import { log } from "./log.js";
 import { reconcileOnce } from "./reconciler.js";
+import { withdrawOnce } from "./withdrawals.js";
 
 /** Any fixed number: every Bursar worker competes for this one advisory lock. */
 const WORKER_LOCK = 4_242_001;
@@ -158,6 +159,18 @@ export async function startWorker(env: WorkerEnv): Promise<RunningWorker | null>
         });
       } catch (error) {
         log.error("gateway floats tick failed", error);
+      }
+      try {
+        await withdrawOnce({
+          db,
+          client,
+          operator,
+          usdc: env.USDC_ADDRESS as Hex,
+          wallets,
+          network,
+        });
+      } catch (error) {
+        log.error("gateway withdrawals tick failed", error);
       }
       try {
         await executeOnce({

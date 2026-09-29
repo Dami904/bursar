@@ -85,6 +85,13 @@
       "when": 1790691360409,
       "tag": "0011_day11_gateway",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1790703304180,
+      "tag": "0012_day11_gateway_withdrawals",
+      "breakpoints": true
     }
   ]
 }

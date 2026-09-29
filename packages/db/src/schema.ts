@@ -65,6 +65,16 @@ export const gatewayFloatStateEnum = pgEnum("gateway_float_state", [
   "ACTIVE",
   "FAILED",
 ]);
+/**
+ * Returning a closed job's unspent Gateway balance to its owner: signed and saved, attested by
+ * Circle, minted on Arc.
+ */
+export const gatewayWithdrawalStateEnum = pgEnum("gateway_withdrawal_state", [
+  "SUBMITTING",
+  "ATTESTED",
+  "DONE",
+  "FAILED",
+]);
 
 export const owners = pgTable("owners", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -148,6 +158,10 @@ export const jobs = pgTable(
       .default(sql`0`),
     /** Gateway-rail payments drawing on that balance (reserved, in flight, stuck or settled). */
     gatewayDrawn: money("gateway_drawn")
+      .notNull()
+      .default(sql`0`),
+    /** Unspent float withdrawn from Gateway back to the owner after the job closed. */
+    gatewayReturned: money("gateway_returned")
       .notNull()
       .default(sql`0`),
     createdAt: at("created_at").notNull().defaultNow(),
@@ -396,6 +410,37 @@ export const gatewayFloats = pgTable(
     index("gateway_floats_job_idx").on(t.jobId, t.state),
     uniqueIndex("gateway_floats_op_idx").on(t.vaultOpId),
     check("gateway_floats_amount_positive", sql`${t.amount} > 0`),
+  ],
+);
+
+export const gatewayWithdrawals = pgTable(
+  "gateway_withdrawals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id),
+    /** What reaches the owner; Circle's fee comes out of the Gateway balance on top. */
+    amount: money("amount").notNull(),
+    fee: money("fee"),
+    recipient: text("recipient").notNull(),
+    state: gatewayWithdrawalStateEnum("state").notNull().default("SUBMITTING"),
+    /** The burn intent and the job wallet's signature, saved before Circle ever sees them. */
+    burnIntent: jsonb("burn_intent").notNull(),
+    intentSignature: text("intent_signature").notNull(),
+    transferId: text("transfer_id"),
+    attestation: text("attestation"),
+    attestationSignature: text("attestation_signature"),
+    mintTx: text("mint_tx"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: at("next_attempt_at"),
+    lastError: text("last_error"),
+    createdAt: at("created_at").notNull().defaultNow(),
+    updatedAt: at("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("gateway_withdrawals_job_idx").on(t.jobId, t.state),
+    check("gateway_withdrawals_amount_positive", sql`${t.amount} > 0`),
   ],
 );
 

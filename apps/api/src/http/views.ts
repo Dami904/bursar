@@ -38,6 +38,8 @@ export function jobView(job: typeof jobs.$inferSelect) {
       funded: usdc(job.gatewayFunded),
       drawn: usdc(job.gatewayDrawn),
       available: usdc(gatewayFloatFree(job)),
+      /** Unspent float given back to the owner from Gateway after the job closed. */
+      returned: usdc(job.gatewayReturned),
     },
     onChain: {
       vaultJobId: job.vaultJobId,

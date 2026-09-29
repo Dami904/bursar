@@ -29,6 +29,8 @@ The console lets you close only when nothing is **held, waiting or stuck**:
 
 This makes sure every payment is accounted for before the books close. After closing, the job is read-only: its history, evidence and audit trail stay available, but no more agents, keys or payments.
 
+If the job made [nanopayments](/docs/nanopayments), any unspent float in its Circle Gateway balance comes back too, shortly after closing: Bursar withdraws it from Gateway straight to the wallet that owns the job, less Circle's withdrawal fee (0.0035 USDC on Arc testnet). The job page shows it as returned from Gateway.
+
 ## When a job expires
 
 At the expiry date the job stops paying anyone. Bursar refuses with `JOB_EXPIRED`, and the vault refuses too, by chain time. The money stays in the vault until you close the job; nothing is returned automatically. Close it from the menu as above.

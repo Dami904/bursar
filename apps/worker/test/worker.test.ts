@@ -4,6 +4,7 @@ import {
   committedOf,
   createDb,
   gatewayFloats,
+  gatewayWithdrawals,
   decisions,
   jobs,
   verifyChain,
@@ -31,6 +32,7 @@ import { testDatabaseUrl } from "../../api/test/global-setup.js";
 import { anchorOnce, type AnchorDeps } from "../src/anchor.js";
 import { executeOnce, type ExecutorDeps } from "../src/executor.js";
 import { floatsOnce, floatSize } from "../src/floats.js";
+import { resetWithdrawScan, withdrawOnce } from "../src/withdrawals.js";
 import { indexOnce } from "../src/indexer.js";
 import { reconcileOnce } from "../src/reconciler.js";
 import {
@@ -82,6 +84,7 @@ beforeEach(async () => {
   seller.mode = "normal";
   gateway.mode = "normal";
   gateway.transfers.length = 0;
+  gateway.withdrawals.length = 0;
   await db.execute(
     sql`TRUNCATE owners, jobs, agents, credentials, payees, category_limits, decisions, authorizations, chain_events, chain_cursors, approvers, approvals, operator_runs, metrics_daily, audit_chain, audit_anchors, siwe_nonces, alert_targets, alerts, telegram_links RESTART IDENTITY CASCADE`,
   );
@@ -781,6 +784,68 @@ describe("Circle Gateway nano lane", () => {
     expect(row.gatewayDrawn).toBe(0n);
     expect(row.reserved).toBe(0n);
     expect(committedOf(row)).toBe(row.gatewayFunded); // the float is still there, unspent
+  });
+
+  it("returns a closed job's unspent float to its owner through Circle Gateway", async () => {
+    const { job, principal } = await nanoJob();
+    const auth = await purchase(principal, "op-nano-close-01", gateway);
+    expect((await runUntil(auth.id, ["SETTLED"], tick, 16)).state).toBe("SETTLED");
+    for (let i = 0; i < 12 && (await floatsOf(job.id))[0]?.state !== "ACTIVE"; i += 1) {
+      await tick();
+    }
+    expect((await floatsOf(job.id))[0]?.state).toBe("ACTIVE");
+
+    // Nothing to return while the job is open.
+    resetWithdrawScan();
+    await withdrawOnce(deps);
+    expect(gateway.withdrawals).toHaveLength(0);
+
+    const owner = chain.wallet(accounts.owner);
+    const hash = await owner.writeContract({
+      address: chain.vault,
+      abi: jobVaultAbi,
+      functionName: "closeJob",
+      args: [job.vaultJobId as Hex],
+    });
+    await chain.client.waitForTransactionReceipt({ hash });
+    // The indexer reads a bounded block range per call, as in the worker's loop.
+    for (let i = 0; i < 10 && (await jobRow(job.id)).status !== "CLOSED"; i += 1) await index();
+    expect((await jobRow(job.id)).status).toBe("CLOSED");
+
+    // Signs and saves, gets Circle's attestation, mints: a tick or two, as in production.
+    const withdrawalOf = async () =>
+      (await db.select().from(gatewayWithdrawals).where(eq(gatewayWithdrawals.jobId, job.id)))[0];
+    for (let i = 0; i < 6 && (await withdrawalOf())?.state !== "DONE"; i += 1) {
+      resetWithdrawScan();
+      await db.update(gatewayWithdrawals).set({ nextAttemptAt: null });
+      await withdrawOnce(deps);
+    }
+    const withdrawal = await withdrawalOf();
+    expect(
+      withdrawal?.state,
+      `withdrawal: ${withdrawal?.state ?? "none"} ${withdrawal?.lastError ?? ""}`,
+    ).toBe("DONE");
+    expect(withdrawal!.mintTx).toMatch(/^0x/);
+    // 0.10 float, 0.001 spent: 0.099 in Gateway, less Circle's 0.00385 maximum fee.
+    expect(withdrawal!.amount).toBe(parseUsdc("0.099") - 3_850n);
+    expect(withdrawal!.fee).toBe(3_500n);
+    expect(gateway.withdrawals).toHaveLength(1);
+    expect(gateway.withdrawals[0]!.recipient.toLowerCase()).toBe(
+      accounts.owner.address.toLowerCase(),
+    );
+
+    const row = await jobRow(job.id);
+    expect(row.gatewayReturned).toBe(withdrawal!.amount);
+    // What's left in the ledger is exactly what's left in Gateway: 350 micro-USDC of dust.
+    expect(row.gatewayFunded - row.gatewayDrawn).toBe(350n);
+
+    // Dust below Circle's fee is closed out, never withdrawn, and the job stops being checked.
+    resetWithdrawScan();
+    await withdrawOnce(deps);
+    expect(gateway.withdrawals).toHaveLength(1);
+    const after = await jobRow(job.id);
+    expect(after.gatewayFunded).toBe(after.gatewayDrawn);
+    expect(committedOf(after)).toBe(after.settled + after.reserved);
   });
 
   it("reconciles unresolved nano payments from Gateway's own records", async () => {

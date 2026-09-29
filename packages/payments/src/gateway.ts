@@ -1,5 +1,5 @@
 import type { PaymentRequirements } from "@x402/core/types";
-import { encodeFunctionData, parseAbi, type Hex } from "viem";
+import { encodeFunctionData, pad, parseAbi, zeroAddress, type Hex } from "viem";
 
 /**
  * Circle Gateway (Nanopayments): sub-cent x402 payments signed off-chain against a Gateway
@@ -13,6 +13,8 @@ export const GATEWAY_SCHEME_NAME = "GatewayWalletBatched";
 export interface GatewayNetwork {
   /** Circle's GatewayWallet contract: deposits go here, and it's the EIP-712 verifying contract. */
   readonly gatewayWallet: Hex;
+  /** Circle's GatewayMinter: mints a withdrawal's USDC to its recipient (anyone may submit). */
+  readonly gatewayMinter: Hex;
   /** Circle's Gateway domain id for the chain (used by the balances API). */
   readonly domain: number;
   readonly apiUrl: string;
@@ -22,6 +24,7 @@ export interface GatewayNetwork {
 export const GATEWAY_NETWORKS: Record<string, GatewayNetwork> = {
   "eip155:5042002": {
     gatewayWallet: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9",
+    gatewayMinter: "0x0022222ABE238Cc2C7Bb1f21003F0a260052475B",
     domain: 26,
     apiUrl: "https://gateway-api-testnet.circle.com/v1",
   },
@@ -146,3 +149,179 @@ export function gatewayDepositCalls(network: string, usdc: Hex, amount: bigint) 
     },
   } as const;
 }
+
+// ------------------------------------------------------------------ withdrawals
+
+/**
+ * Taking money back out of Gateway, on the same chain: the depositor signs a burn intent, Circle
+ * attests it (charging a flat fee from the balance), and anyone submits the attestation to the
+ * GatewayMinter, which mints the USDC to the recipient. Circle only burns the balance once it sees
+ * the mint, so an attestation that's never minted expires and the balance comes back.
+ */
+export interface BurnIntent {
+  readonly maxBlockHeight: bigint;
+  readonly maxFee: bigint;
+  readonly spec: {
+    readonly version: number;
+    readonly sourceDomain: number;
+    readonly destinationDomain: number;
+    readonly sourceContract: Hex;
+    readonly destinationContract: Hex;
+    readonly sourceToken: Hex;
+    readonly destinationToken: Hex;
+    readonly sourceDepositor: Hex;
+    readonly destinationRecipient: Hex;
+    readonly sourceSigner: Hex;
+    readonly destinationCaller: Hex;
+    readonly value: bigint;
+    readonly salt: Hex;
+    readonly hookData: Hex;
+  };
+}
+
+const bytes32 = (address: string) => pad(address.toLowerCase() as Hex, { size: 32 });
+const jsonSafe = (_key: string, value: unknown) =>
+  typeof value === "bigint" ? value.toString() : value;
+
+/**
+ * A same-chain withdrawal of `available` from `depositor`'s Gateway balance to `recipient`, less
+ * Circle's fee (read from Circle's estimate). Returns null when the balance wouldn't cover the fee.
+ */
+export async function gatewayWithdrawIntent(
+  network: string,
+  params: {
+    readonly usdc: Hex;
+    readonly depositor: Hex;
+    readonly recipient: Hex;
+    readonly available: bigint;
+    readonly salt: Hex;
+  },
+): Promise<BurnIntent | null> {
+  const config = networkOf(network);
+  const spec = {
+    version: 1,
+    sourceDomain: config.domain,
+    destinationDomain: config.domain,
+    sourceContract: bytes32(config.gatewayWallet),
+    destinationContract: bytes32(config.gatewayMinter),
+    sourceToken: bytes32(params.usdc),
+    destinationToken: bytes32(params.usdc),
+    sourceDepositor: bytes32(params.depositor),
+    destinationRecipient: bytes32(params.recipient),
+    sourceSigner: bytes32(params.depositor),
+    destinationCaller: bytes32(zeroAddress),
+    value: params.available,
+    salt: params.salt,
+    hookData: "0x" as Hex,
+  };
+  const estimate = (await gatewayFetch(`${config.apiUrl}/estimate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify([{ spec }], jsonSafe),
+  })) as { burnIntent?: { maxBlockHeight?: string; maxFee?: string } }[];
+  const quoted = estimate[0]?.burnIntent;
+  if (quoted?.maxFee === undefined || quoted.maxBlockHeight === undefined) {
+    throw new GatewayError("Gateway's estimate has no fee");
+  }
+  const maxFee = BigInt(quoted.maxFee);
+  if (params.available <= maxFee) return null;
+  return {
+    maxBlockHeight: BigInt(quoted.maxBlockHeight),
+    maxFee,
+    spec: { ...spec, value: params.available - maxFee },
+  };
+}
+
+/** The EIP-712 message the depositor signs for a burn intent (Circle's domain has no chain id). */
+export function burnIntentTypedData(intent: BurnIntent) {
+  return {
+    domain: { name: "GatewayWallet", version: "1" },
+    types: {
+      TransferSpec: [
+        { name: "version", type: "uint32" },
+        { name: "sourceDomain", type: "uint32" },
+        { name: "destinationDomain", type: "uint32" },
+        { name: "sourceContract", type: "bytes32" },
+        { name: "destinationContract", type: "bytes32" },
+        { name: "sourceToken", type: "bytes32" },
+        { name: "destinationToken", type: "bytes32" },
+        { name: "sourceDepositor", type: "bytes32" },
+        { name: "destinationRecipient", type: "bytes32" },
+        { name: "sourceSigner", type: "bytes32" },
+        { name: "destinationCaller", type: "bytes32" },
+        { name: "value", type: "uint256" },
+        { name: "salt", type: "bytes32" },
+        { name: "hookData", type: "bytes" },
+      ],
+      BurnIntent: [
+        { name: "maxBlockHeight", type: "uint256" },
+        { name: "maxFee", type: "uint256" },
+        { name: "spec", type: "TransferSpec" },
+      ],
+    },
+    primaryType: "BurnIntent" as const,
+    message: intent,
+  };
+}
+
+export interface GatewayAttestation {
+  readonly transferId: string;
+  readonly attestation: Hex;
+  readonly signature: Hex;
+  /** What Circle charged, in micro-USDC. */
+  readonly fee: bigint;
+}
+
+/** Circle refused a burn intent because it already attested it (sent twice). */
+export class BurnIntentUsedError extends GatewayError {}
+
+/** Sends a signed burn intent to Circle for attestation. */
+export async function submitBurnIntent(
+  network: string,
+  intent: BurnIntent,
+  signature: Hex,
+): Promise<GatewayAttestation> {
+  const config = networkOf(network);
+  let data: Record<string, unknown>;
+  try {
+    data = (await gatewayFetch(`${config.apiUrl}/transfer`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify([{ burnIntent: intent, signature }], jsonSafe),
+    })) as Record<string, unknown>;
+  } catch (error) {
+    if (error instanceof GatewayError && /already been used/i.test(error.message)) {
+      throw new BurnIntentUsedError(error.message);
+    }
+    throw error;
+  }
+  if (typeof data.attestation !== "string" || typeof data.signature !== "string") {
+    throw new GatewayError("Gateway returned no attestation");
+  }
+  const fees = data.fees as { total?: string } | undefined;
+  return {
+    transferId: String(data.transferId),
+    attestation: data.attestation as Hex,
+    signature: data.signature as Hex,
+    fee: typeof fees?.total === "string" ? toMicros(fees.total) : intent.maxFee,
+  };
+}
+
+/** A withdrawal's status at Circle: "finalized" once the mint landed, with its transaction. */
+export async function gatewayTransferStatus(
+  network: string,
+  transferId: string,
+): Promise<{ readonly status: string; readonly transactionHash: string | null }> {
+  const config = networkOf(network);
+  const data = (await gatewayFetch(`${config.apiUrl}/transfer/${encodeURIComponent(transferId)}`, {
+    method: "GET",
+  })) as { status?: unknown; transactionHash?: unknown };
+  return {
+    status: String(data.status ?? "unknown"),
+    transactionHash: typeof data.transactionHash === "string" ? data.transactionHash : null,
+  };
+}
+
+export const gatewayMinterAbi = parseAbi([
+  "function gatewayMint(bytes attestationPayload, bytes signature)",
+]);

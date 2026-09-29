@@ -91,6 +91,11 @@ export function Job() {
       </div>
       <div className="mt-4">
         <BudgetBar job={j} />
+        {j.gateway !== undefined && Number(j.gateway.returned) > 0 && (
+          <p className="mt-1 text-xs text-muted">
+            {money(j.gateway.returned)} of unspent nanopayment float returned from Circle Gateway
+          </p>
+        )}
       </div>
 
       {waiting.map((p) => (

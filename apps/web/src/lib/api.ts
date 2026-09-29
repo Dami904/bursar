@@ -98,7 +98,7 @@ export interface Job {
   operatorRunAt: string | null;
   onChain: { vaultJobId: string | null; agentWallet: string | null; policyVersion: number };
   /** Circle Gateway float for nano payments (absent from older API responses). */
-  gateway?: { funded: string; drawn: string; available: string };
+  gateway?: { funded: string; drawn: string; available: string; returned: string };
   agents?: number;
   needsYou?: number;
 }

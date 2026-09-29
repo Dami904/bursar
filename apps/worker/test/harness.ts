@@ -365,6 +365,10 @@ export interface LocalGateway {
   readonly url: string;
   /** What the stand-in Gateway API has received, as Circle's transfers endpoint would list it. */
   readonly transfers: LocalGatewayTransfer[];
+  /** Withdrawals Circle has attested: value to the recipient, plus the fee, off the balance. */
+  readonly withdrawals: { id: string; depositor: string; recipient: string; value: bigint }[];
+  /** Circle's flat withdrawal fee. */
+  readonly withdrawFee: bigint;
   /**
    * normal; refuse: never accepts; accept-then-crash: Gateway takes it, the seller answers 502;
    * crash: the seller answers 502 before anything reaches Gateway.
@@ -382,6 +386,9 @@ export interface LocalGateway {
 export async function startGateway(chain: Chainside, price = 1_000n): Promise<LocalGateway> {
   const network = `eip155:${chain.client.chain?.id ?? 31337}`;
   const transfers: LocalGatewayTransfer[] = [];
+  const withdrawals: LocalGateway["withdrawals"] = [];
+  const withdrawFee = 3_500n;
+  const usedSpecs = new Set<string>();
   const state: { mode: LocalGateway["mode"] } = { mode: "normal" };
   let url = "";
   const balanceOf = async (depositor: string) => {
@@ -394,7 +401,10 @@ export async function startGateway(chain: Chainside, price = 1_000n): Promise<Lo
     const spent = transfers
       .filter((t) => t.from.toLowerCase() === depositor.toLowerCase())
       .reduce((sum, t) => sum + t.amount, 0n);
-    return allowance - spent;
+    const withdrawn = withdrawals
+      .filter((w) => w.depositor.toLowerCase() === depositor.toLowerCase())
+      .reduce((sum, w) => sum + w.value + withdrawFee, 0n);
+    return allowance - spent - withdrawn;
   };
   const decimal = (micros: bigint) =>
     `${micros / 1_000_000n}.${(micros % 1_000_000n).toString().padStart(6, "0")}`;
@@ -415,6 +425,52 @@ export async function startGateway(chain: Chainside, price = 1_000n): Promise<Lo
         return res.end(
           JSON.stringify({ balances: [{ balance: decimal(await balanceOf(depositor)) }] }),
         );
+      }
+      const fromBytes32 = (value: string) => `0x${value.slice(-40)}`;
+      if (req.method === "POST" && path === "/v1/estimate") {
+        const [{ spec }] = JSON.parse(await read(req)) as [{ spec: Record<string, string> }];
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(
+          JSON.stringify([{ burnIntent: { maxBlockHeight: "999999999", maxFee: "3850", spec } }]),
+        );
+      }
+      if (req.method === "POST" && path === "/v1/transfer") {
+        const [{ burnIntent }] = JSON.parse(await read(req)) as [
+          { burnIntent: { maxFee: string; spec: Record<string, string> } },
+        ];
+        const spec = burnIntent.spec;
+        const key = JSON.stringify(spec);
+        if (usedSpecs.has(key)) {
+          res.writeHead(400, { "content-type": "application/json" });
+          return res.end('{"success":false,"message":"Transfer spec has already been used"}');
+        }
+        const depositor = fromBytes32(spec.sourceDepositor!);
+        const value = BigInt(spec.value!);
+        if ((await balanceOf(depositor)) < value + withdrawFee) {
+          res.writeHead(400, { "content-type": "application/json" });
+          return res.end('{"success":false,"message":"Insufficient balance"}');
+        }
+        usedSpecs.add(key);
+        const id = crypto.randomUUID();
+        withdrawals.push({
+          id,
+          depositor,
+          recipient: fromBytes32(spec.destinationRecipient!),
+          value,
+        });
+        res.writeHead(201, { "content-type": "application/json" });
+        return res.end(
+          JSON.stringify({
+            transferId: id,
+            attestation: `0x${"ab".repeat(32)}`,
+            signature: `0x${"cd".repeat(65)}`,
+            fees: { token: "USDC", total: "0.0035" },
+          }),
+        );
+      }
+      if (req.method === "GET" && path.startsWith("/v1/transfer/")) {
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ status: "pending", transactionHash: null }));
       }
       if (req.method === "GET" && path === "/v1/x402/transfers") {
         const query = new URL(req.url ?? "/", "http://local").searchParams;
@@ -531,12 +587,16 @@ export async function startGateway(chain: Chainside, price = 1_000n): Promise<Lo
   url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   registerGatewayNetwork(network, {
     gatewayWallet: LOCAL_GATEWAY_WALLET,
+    // No minter on the local chain: the mint is a plain call; the stand-in API tracks the balance.
+    gatewayMinter: "0x0000000000000000000000000000000000047a7f",
     domain: 0,
     apiUrl: `${url}/v1`,
   });
   return {
     url,
     transfers,
+    withdrawals,
+    withdrawFee,
     get mode() {
       return state.mode;
     },
