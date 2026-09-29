@@ -33,7 +33,7 @@ import {
   type Transport,
   type WalletClient,
 } from "viem";
-import { log, type Logger } from "./log.js";
+import { errorText, log, type Logger } from "./log.js";
 
 export interface ExecutorDeps {
   readonly db: Db;
@@ -46,6 +46,8 @@ export interface ExecutorDeps {
   readonly network: string;
   /** How long to wait for a release receipt before leaving it for the next tick. */
   readonly receiptTimeoutMs?: number;
+  /** Local development only: pay sellers on private addresses (127.0.0.1). */
+  readonly allowPrivateHosts?: boolean;
 }
 
 const RECEIPT_TIMEOUT_MS = 30_000;
@@ -101,7 +103,7 @@ export async function executeOnce(deps: ExecutorDeps): Promise<number> {
       logger.error("purchase step failed; will retry", error, { state: auth.state });
       await annotate(deps.db, auth.id, {
         attempts: auth.attempts + 1,
-        lastError: error instanceof Error ? error.message.slice(0, 500) : String(error),
+        lastError: errorText(error),
         nextAttemptAt: new Date(Date.now() + RETRY_DELAY_MS),
       });
     }
@@ -316,7 +318,7 @@ async function settleRelease(
     // Either way releasedFor settles it on the next tick; never guess.
     logger.warn("release broadcast failed; will re-check the chain", {
       opId,
-      error: error instanceof Error ? error.message.slice(0, 200) : String(error),
+      error: errorText(error, 200),
     });
     return "wait";
   }
@@ -401,7 +403,9 @@ async function pay(deps: ExecutorDeps, auth: AuthorizationRow, logger: Logger): 
     return "wait";
   }
 
-  const outcome = await sendPayment(auth.paymentUrl, stored.signedHeader);
+  const outcome = await sendPayment(auth.paymentUrl, stored.signedHeader, {
+    allowPrivateHosts: deps.allowPrivateHosts === true,
+  });
   switch (outcome.kind) {
     case "PAID": {
       // Trust, then verify: the seller's receipt is confirmed against USDC itself.
@@ -551,7 +555,9 @@ async function payGateway(
     return "wait";
   }
 
-  const outcome = await sendPayment(auth.paymentUrl, stored.signedHeader);
+  const outcome = await sendPayment(auth.paymentUrl, stored.signedHeader, {
+    allowPrivateHosts: deps.allowPrivateHosts === true,
+  });
   switch (outcome.kind) {
     case "PAID": {
       // Trust, then verify: the seller's receipt is confirmed with Circle Gateway itself.

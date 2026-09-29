@@ -317,6 +317,9 @@ importers:
       '@x402/evm':
         specifier: 2.27.0
         version: 2.27.0(typescript@6.0.3)
+      undici:
+        specifier: 7.24.4
+        version: 7.24.4
       viem:
         specifier: ^2.56.9
         version: 2.56.9(typescript@6.0.3)(zod@4.6.5)
@@ -4004,6 +4007,10 @@ packages:
 
   undici-types@8.9.0:
     resolution: {integrity: sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg==}
+
+  undici@7.24.4:
+    resolution: {integrity: sha512-BM/JzwwaRXxrLdElV2Uo6cTLEjhSb3WXboncJamZ15NgUURmvlXvxa6xkwIOILIjPNo9i8ku136ZvWV0Uly8+w==}
+    engines: {node: '>=20.18.1'}
 
   unified@11.0.5:
     resolution: {integrity: sha512-xKvGhPWw3k84Qjh8bI3ZeJjqnyadK+GEFtazSfZv/rKeTkTjOJho6mFqh2SM96iIcZokxiOpg78GazTSg8+KHA==}
@@ -8950,6 +8957,8 @@ snapshots:
     optional: true
 
   undici-types@8.9.0: {}
+
+  undici@7.24.4: {}
 
   unified@11.0.5:
     dependencies:

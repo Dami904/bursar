@@ -27,6 +27,8 @@ const schema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
   /** Local development only: let webhooks reach 127.0.0.1. */
   ALLOW_PRIVATE_WEBHOOKS: z.enum(["true", "false"]).default("false"),
+  /** Local development only: pay sellers on 127.0.0.1 (same flag as the API's). */
+  ALLOW_PRIVATE_PAYEES: z.enum(["true", "false"]).default("false"),
   /** Where automatic operator runs reach the Bursar API. */
   BURSAR_API_URL: z.string().url().default("http://127.0.0.1:8787"),
   /** "false" turns off automatic operator runs even when a model key is set. */

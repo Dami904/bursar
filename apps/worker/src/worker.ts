@@ -181,6 +181,7 @@ export async function startWorker(env: WorkerEnv): Promise<RunningWorker | null>
           usdc: env.USDC_ADDRESS as Hex,
           wallets,
           network,
+          allowPrivateHosts: env.ALLOW_PRIVATE_PAYEES === "true",
         });
       } catch (error) {
         log.error("executor tick failed", error);

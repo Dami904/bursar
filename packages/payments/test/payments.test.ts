@@ -10,6 +10,7 @@ import {
   UnsafeUrlError,
   assertFetchable,
   isPrivateAddress,
+  publicFetchOptions,
   quote,
   sendPayment,
   signPayment,
@@ -148,6 +149,14 @@ describe("SSRF guard", () => {
     "fd00::1",
     "fe80::1",
     "::ffff:10.0.0.1",
+    // IPv4 written as IPv6, the way the URL parser normalises it: loopback and cloud metadata.
+    "::ffff:7f00:1",
+    "::ffff:a9fe:a9fe",
+    "::7f00:1",
+    "64:ff9b::a9fe:a9fe",
+    "fe90::1",
+    "198.51.100.7",
+    "not-an-address",
   ])("treats %s as private", (address) => expect(isPrivateAddress(address)).toBe(true));
 
   it.each(["8.8.8.8", "1.1.1.1", "2606:4700:4700::1111"])("treats %s as public", (address) =>
@@ -164,6 +173,31 @@ describe("SSRF guard", () => {
       UnsafeUrlError,
     );
     await expect(assertFetchable("http://127.0.0.1:4021/x", true)).resolves.toBeInstanceOf(URL);
+  });
+
+  it("refuses internal addresses however the URL spells them", async () => {
+    for (const url of [
+      "http://[::ffff:127.0.0.1]:8787/health",
+      "http://[::ffff:169.254.169.254]/latest/meta-data",
+      "http://[::127.0.0.1]/",
+      "http://0x7f.1/",
+      "http://2130706433/",
+    ]) {
+      await expect(assertFetchable(url, false), url).rejects.toThrow(UnsafeUrlError);
+    }
+  });
+
+  it("checks the address again when connecting, so a name can't rebind to an internal one", async () => {
+    // `localhost` stands in for a seller whose DNS answer changed after the check.
+    const internal = createServer((_req, res) => res.end("internal"));
+    await new Promise<void>((resolve) => internal.listen(0, "127.0.0.1", resolve));
+    const url = `http://localhost:${(internal.address() as AddressInfo).port}/`;
+    try {
+      expect(await (await fetch(url, publicFetchOptions(true))).text()).toBe("internal");
+      await expect(fetch(url, publicFetchOptions(false))).rejects.toThrow();
+    } finally {
+      internal.close();
+    }
   });
 });
 

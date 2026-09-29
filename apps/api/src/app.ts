@@ -25,6 +25,13 @@ import {
   type WalletProvider,
 } from "@bursar/payments";
 import { HttpError, badRequest, forbidden, notFound, unauthorized } from "./http/errors.js";
+import {
+  DEFAULT_RATE_LIMITS,
+  RateLimitedError,
+  RateLimiter,
+  clientIp,
+  type RateLimitConfig,
+} from "./http/rate-limit.js";
 import { agentView, authorizationView, decisionView, jobView } from "./http/views.js";
 import { createAgent, replaceAgent, revokeAgent, spawnSubagent } from "./services/agents.js";
 import { addPayee, createJob, getOwnedJob, setCategoryLimit } from "./services/jobs.js";
@@ -175,6 +182,10 @@ export interface ApiDeps {
   readonly demoJobId?: string | undefined;
   /** One JSON line per request (method, path, status, time). Off in tests. */
   readonly logRequests?: boolean;
+  /** Request limits; false turns them off. Default: DEFAULT_RATE_LIMITS. */
+  readonly rateLimits?: RateLimitConfig | false;
+  /** Behind a proxy (Render): client IPs come from its forwarding headers. */
+  readonly trustProxy?: boolean;
 }
 
 function logLine(level: "info" | "warn" | "error", msg: string, fields: Record<string, unknown>) {
@@ -188,6 +199,15 @@ function logLine(level: "info" | "warn" | "error", msg: string, fields: Record<s
   (level === "info" ? process.stdout : process.stderr).write(`${line}
 `);
 }
+
+/** Calls that spend or can lead to spending: limited more tightly per key. */
+const SPEND_PATHS = new Set([
+  "/spend/request",
+  "/spend/invoice",
+  "/spend/purchase",
+  "/spend/quote",
+  "/spend/subagent",
+]);
 
 const PUBLIC_PATHS = new Set(["/health", "/metrics/public", "/auth/nonce", "/auth/verify"]);
 
@@ -250,6 +270,42 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
     }),
   );
 
+  // Rate limits: per client IP before a key is known, per key after.
+  const limits = deps.rateLimits === false ? null : (deps.rateLimits ?? DEFAULT_RATE_LIMITS);
+  const limiters =
+    limits === null
+      ? null
+      : {
+          signIn: new RateLimiter(limits.signIn),
+          public: new RateLimiter(limits.public),
+          badKey: new RateLimiter(limits.badKey),
+          perKey: new RateLimiter(limits.perKey),
+          spend: new RateLimiter(limits.spend),
+        };
+  const ipOf = (c: Context<Env>) =>
+    clientIp((name) => c.req.header(name), deps.trustProxy === true);
+  /** Takes a token, or throws 429. Sets the RateLimit headers either way. */
+  function limit(c: Context<Env>, limiter: RateLimiter | undefined, key: string) {
+    if (limiter === undefined) return;
+    const verdict = limiter.take(key);
+    c.header("RateLimit-Limit", String(verdict.limit));
+    c.header("RateLimit-Remaining", String(verdict.remaining));
+    if (!verdict.allowed) throw new RateLimitedError(verdict);
+  }
+
+  app.use("*", async (c, next) => {
+    if (limiters === null || c.req.method === "OPTIONS" || c.req.path === "/health") {
+      return next();
+    }
+    const path = c.req.path;
+    if (path === "/auth/nonce" || path === "/auth/verify") {
+      limit(c, limiters.signIn, ipOf(c));
+    } else if (path === "/metrics/public" || path === "/demo" || path.startsWith("/demo/")) {
+      limit(c, limiters.public, ipOf(c));
+    }
+    return next();
+  });
+
   app.get("/health", (c) => c.json({ status: "ok" }));
 
   /** Starts a wallet sign-in: a one-time nonce for the message the wallet will sign. */
@@ -288,10 +344,23 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
     ) {
       return next();
     }
+    // An address that keeps sending bad keys is slowed down before any lookup.
+    const ip = ipOf(c);
+    if (limiters !== null) {
+      const guessing = limiters.badKey.peek(ip);
+      if (!guessing.allowed) throw new RateLimitedError(guessing);
+    }
     const key = bearerKey(c.req.header("authorization"));
     const principal = key === null ? null : await resolvePrincipal(db, key);
-    if (principal === null) throw unauthorized();
+    if (principal === null) {
+      limiters?.badKey.take(ip);
+      throw unauthorized();
+    }
     c.set("principal", principal);
+    if (limiters !== null) {
+      limit(c, limiters.perKey, principal.credentialId);
+      if (SPEND_PATHS.has(c.req.path)) limit(c, limiters.spend, principal.credentialId);
+    }
     return next();
   });
 
@@ -866,6 +935,12 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
   );
 
   app.onError((error, c) => {
+    if (error instanceof RateLimitedError) {
+      c.header("Retry-After", String(error.verdict.retryAfter));
+      c.header("RateLimit-Limit", String(error.verdict.limit));
+      c.header("RateLimit-Remaining", "0");
+      return c.json(error.toBody(), 429);
+    }
     if (error instanceof HttpError) return c.json(error.toBody(), error.status);
     if (error instanceof LedgerError) {
       return c.json(

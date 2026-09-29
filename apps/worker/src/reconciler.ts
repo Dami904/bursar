@@ -19,7 +19,7 @@ import {
 import { and, eq, inArray, isNotNull, lt } from "drizzle-orm";
 import type { Account, Chain, Hex, PublicClient, Transport, WalletClient } from "viem";
 import { revertReason } from "./executor.js";
-import { log, type Logger } from "./log.js";
+import { errorText, log, type Logger } from "./log.js";
 
 export interface ReconcilerDeps {
   readonly db: Db;
@@ -93,7 +93,7 @@ export async function reconcileOnce(deps: ReconcilerDeps): Promise<void> {
       if (error instanceof LedgerError && error.code === "STATE_CHANGED") continue;
       logger.error("reconcile step failed; will retry", error);
       await annotate(deps.db, auth.id, {
-        lastError: error instanceof Error ? error.message.slice(0, 500) : String(error),
+        lastError: errorText(error),
       });
     }
   }

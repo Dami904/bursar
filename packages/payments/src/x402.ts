@@ -13,7 +13,7 @@ import { BatchEvmScheme } from "@circle-fin/x402-batching/client";
 import { ExactEvmScheme } from "@x402/evm/exact/client";
 import type { Hex } from "viem";
 import { GATEWAY_NETWORKS, isGatewayRequirement } from "./gateway.js";
-import { assertFetchable } from "./ssrf.js";
+import { assertFetchable, publicFetchOptions } from "./ssrf.js";
 
 const requestTimeoutMs = 15_000;
 /** Paid responses returned to agents are capped; nobody needs a megabyte in a decision log. */
@@ -56,6 +56,7 @@ export async function quote(url: string, options: QuoteOptions): Promise<Quote> 
   let response: Response;
   try {
     response = await fetch(safe, {
+      ...publicFetchOptions(options.allowPrivateHosts),
       method: "GET",
       redirect: "manual",
       signal: AbortSignal.timeout(requestTimeoutMs),
@@ -126,6 +127,7 @@ export async function discover(
   let response: Response;
   try {
     response = await fetch(catalogUrl, {
+      ...publicFetchOptions(options.allowPrivateHosts),
       method: "GET",
       redirect: "manual",
       signal: AbortSignal.timeout(3_000),
@@ -235,10 +237,16 @@ export type PaymentOutcome =
   | { readonly kind: "UNKNOWN"; readonly reason: string };
 
 /** Sends a signed payment. Never throws for network trouble: that's an UNKNOWN outcome. */
-export async function sendPayment(url: string, header: string): Promise<PaymentOutcome> {
+export async function sendPayment(
+  url: string,
+  header: string,
+  options: { readonly allowPrivateHosts?: boolean } = {},
+): Promise<PaymentOutcome> {
   let response: Response;
   try {
+    // Checked again at connection time: the seller's DNS may have changed since the quote.
     response = await fetch(url, {
+      ...publicFetchOptions(options.allowPrivateHosts === true),
       method: "GET",
       redirect: "manual",
       headers: { "PAYMENT-SIGNATURE": header },

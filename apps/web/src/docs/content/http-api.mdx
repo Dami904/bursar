@@ -27,8 +27,17 @@ Errors have a status code and a JSON body with a stable `error` code and a human
 | 409 | `DELEGATION_NOT_ALLOWED`, `DELEGATION_TOO_DEEP`, `AGENT_REVOKED`, `ALREADY_REPLACED` | Helper and replacement rules; see [Helpers](#helpers). |
 | 422 | `QUOTE_FAILED` | The seller didn't answer with a valid x402 price, or couldn't be reached. |
 | 422 | `PRICE_ABOVE_MAX` | The seller's price is higher than the `maxPrice` you sent. Nothing was recorded. |
+| 429 | `RATE_LIMITED` | Too many requests. Wait the number of seconds in the `Retry-After` header, then try again. See [Rate limits](#rate-limits). |
 
 A payment that Bursar **denies** is not an HTTP error. It's a `200` with `"result": "DENIED"` and a `reason`, because the request was valid and the decision is part of the job's record. See [Refusal codes](/docs/refusal-codes).
+
+### Rate limits
+
+Each key can make 600 requests a minute, and 60 spending calls a minute (`request`, `purchase`, `invoice`, `quote` and starting helpers). Allowances refill evenly, so short bursts are fine. Every agent key has its own allowance, so one busy agent doesn't slow down the others on the same job.
+
+Without a key, each address can start 20 wallet sign-ins and read the public demo 120 times a minute. An address that keeps sending wrong keys is slowed down after 30 a minute.
+
+Responses carry `RateLimit-Limit` and `RateLimit-Remaining`. A limited request gets `429` with `Retry-After` in seconds. Nothing was recorded, so it's safe to send the same request again, with the same `operationId`, after the wait.
 
 ### Safe retries with operationId
 

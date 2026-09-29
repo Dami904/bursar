@@ -9,6 +9,25 @@ type Fields = Record<string, unknown>;
 const serialize = (value: unknown): unknown =>
   typeof value === "bigint" ? value.toString() : value;
 
+/**
+ * Values that must never reach a log line or a stored error, even inside an error message. viem
+ * puts the RPC URL in its errors, and a hosted RPC URL carries an access token in its path.
+ */
+function secrets(): string[] {
+  return [process.env.ARC_RPC_URL].filter((v): v is string => v !== undefined && v.length > 12);
+}
+
+export function redact(text: string): string {
+  let out = text;
+  for (const secret of secrets()) out = out.replaceAll(secret, "<arc-rpc-url>");
+  return out;
+}
+
+/** An error's message, safe to store (redacted, and clipped to `max` characters). */
+export function errorText(error: unknown, max = 500): string {
+  return redact(error instanceof Error ? error.message : String(error)).slice(0, max);
+}
+
 export class Logger {
   constructor(private readonly context: Fields = {}) {}
 
@@ -43,7 +62,9 @@ export class Logger {
       { ts: new Date().toISOString(), level, service: "worker", msg, ...this.context, ...fields },
       (_key, value: unknown) => serialize(value),
     );
-    (level === "error" || level === "warn" ? process.stderr : process.stdout).write(`${line}\n`);
+    (level === "error" || level === "warn" ? process.stderr : process.stdout).write(
+      `${redact(line)}\n`,
+    );
   }
 }
 

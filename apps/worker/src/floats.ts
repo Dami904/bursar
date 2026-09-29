@@ -10,7 +10,7 @@ import {
 import { and, asc, eq, inArray, lt, sql } from "drizzle-orm";
 import type { Account, Chain, Hex, PublicClient, Transport, WalletClient } from "viem";
 import { revertReason } from "./executor.js";
-import { log, type Logger } from "./log.js";
+import { errorText, log, type Logger } from "./log.js";
 import { ensureGas } from "./reconciler.js";
 
 /**
@@ -106,7 +106,7 @@ export async function floatsOnce(deps: FloatDeps): Promise<void> {
         .update(gatewayFloats)
         .set({
           attempts: float.attempts + 1,
-          lastError: error instanceof Error ? error.message.slice(0, 500) : String(error),
+          lastError: errorText(error),
           nextAttemptAt: new Date(Date.now() + RETRY_MS),
           updatedAt: new Date(),
         })

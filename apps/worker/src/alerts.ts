@@ -11,9 +11,9 @@ import {
   type Db,
 } from "@bursar/db";
 import { formatUsdc } from "@bursar/money";
-import { assertFetchable } from "@bursar/payments";
+import { assertFetchable, publicFetchOptions } from "@bursar/payments";
 import { and, asc, eq, gt, isNull, lte, sql } from "drizzle-orm";
-import { log } from "./log.js";
+import { errorText, log } from "./log.js";
 
 export interface AlertDeps {
   readonly db: Db;
@@ -222,6 +222,7 @@ export async function deliverAlerts(deps: AlertDeps): Promise<number> {
           });
           const timestamp = String(Math.floor(now.getTime() / 1000));
           const response = await doFetch(safe, {
+            ...publicFetchOptions(deps.allowPrivateWebhooks ?? false),
             method: "POST",
             redirect: "manual",
             signal: AbortSignal.timeout(5_000),
@@ -242,9 +243,7 @@ export async function deliverAlerts(deps: AlertDeps): Promise<number> {
           });
         }
       } catch (error) {
-        errors.push(
-          `${target.kind.toLowerCase()}: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        errors.push(`${target.kind.toLowerCase()}: ${errorText(error)}`);
       }
     }
     if (errors.length === 0) {

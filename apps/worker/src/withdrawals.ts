@@ -23,7 +23,7 @@ import {
   type WalletClient,
 } from "viem";
 import { revertReason } from "./executor.js";
-import { log, type Logger } from "./log.js";
+import { errorText, log, type Logger } from "./log.js";
 
 /**
  * Gives a closed job's unspent Gateway float back to its owner.
@@ -85,7 +85,7 @@ export async function withdrawOnce(deps: WithdrawDeps): Promise<void> {
       logger.error("gateway withdrawal step failed; will retry", error, { state: row.state });
       await setRow(deps, row.id, {
         attempts: row.attempts + 1,
-        lastError: error instanceof Error ? error.message.slice(0, 500) : String(error),
+        lastError: errorText(error),
         nextAttemptAt: new Date(Date.now() + RETRY_MS),
       });
     }

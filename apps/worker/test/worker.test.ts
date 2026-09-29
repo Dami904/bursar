@@ -70,6 +70,7 @@ beforeAll(async () => {
     wallets: localWallets(chain),
     network: "eip155:31337",
     receiptTimeoutMs: 3_000,
+    allowPrivateHosts: true, // the test sellers run on 127.0.0.1
   };
 });
 

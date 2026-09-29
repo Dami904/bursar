@@ -56,6 +56,8 @@ const app = createApp(db, {
   telegramBot: env.TELEGRAM_BOT_USERNAME,
   demoJobId: env.DEMO_JOB_ID,
   logRequests: true,
+  // Render (and its Cloudflare edge) forward the client's address.
+  trustProxy: true,
   siwe: { domains: webOrigins.map((origin) => new URL(origin).host), chainId: env.ARC_CHAIN_ID },
 });
 
