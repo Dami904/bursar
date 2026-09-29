@@ -81,6 +81,8 @@ export function createSellerApp(env: SellerEnv) {
   }
 
   const app = new Hono()
+    // A storefront for people who open the address in a browser. Agents use the catalog below.
+    .get("/", (c) => c.html(storefront(products, seller.address)))
     .get("/health", (c) => c.json({ status: "ok", payTo: seller.address, network }))
     // The catalog agents read to learn what's for sale (prices come from each URL's 402 quote).
     .get("/.well-known/x402", (c) =>
@@ -144,4 +146,51 @@ export function createSellerApp(env: SellerEnv) {
     app.get(product.path, (c) => c.json({ ...product.body(), servedAt: new Date().toISOString() }));
   }
   return { app, payTo: seller.address, network };
+}
+
+const escape = (text: string) =>
+  text.replace(
+    /[&<>"]/g,
+    (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch] ?? ch,
+  );
+
+/** The human-readable front page: what's for sale, the price, and how agents buy it. */
+function storefront(
+  items: readonly { path: string; units: string; description: string }[],
+  payTo: string,
+): string {
+  const rows = items
+    .map(
+      (p) =>
+        `<tr><td><code>GET ${escape(p.path)}</code></td><td>${escape(p.description)}</td><td class="price">${(Number(p.units) / 1e6).toFixed(2)} USDC</td></tr>`,
+    )
+    .join("");
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scenestock · film assets for agents</title>
+<style>
+:root{color-scheme:light dark;--bg:#fafaf9;--ink:#18181b;--muted:#71717a;--line:#e4e4e7;--gold:#b08a2e}
+@media (prefers-color-scheme:dark){:root{--bg:#0c0c0d;--ink:#f4f4f5;--muted:#a1a1aa;--line:#27272a;--gold:#ddb75a}}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:760px;margin:0 auto;padding:56px 16px}
+h1{font-size:40px;letter-spacing:-.02em;margin:8px 0}
+.kicker{color:var(--gold);font-size:12px;letter-spacing:.2em;text-transform:uppercase;font-weight:600}
+p{color:var(--muted)}
+.wrap{overflow-x:auto;border:1px solid var(--line);border-radius:14px;margin:28px 0}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:12px 16px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+tr:last-child td{border-bottom:0}
+th{font-weight:500;color:var(--muted)}
+.price{white-space:nowrap;font-variant-numeric:tabular-nums}
+code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+a{color:var(--ink)}
+</style></head>
+<body><main>
+<div class="kicker">x402 seller · Arc testnet</div>
+<h1>Scenestock</h1>
+<p>Film assets for AI agents: script lines, stock image briefs and market reports, paid per request in USDC with <a href="https://www.x402.org">x402</a>. Each URL answers <code>402 Payment Required</code> with its price; pay and it delivers.</p>
+<div class="wrap"><table><thead><tr><th>Resource</th><th>What you get</th><th>Price</th></tr></thead><tbody>${rows}</tbody></table></div>
+<p>Catalog for agents: <a href="/.well-known/x402"><code>/.well-known/x402</code></a>. Payments go to <code>${escape(payTo)}</code>, settled by Circle's facilitator on Arc testnet.</p>
+<p>Scenestock is the seller in <a href="https://bursarhq.vercel.app/demo">Bursar's live demo</a>, where an AI operator buys from it within a job's budget.</p>
+</main></body></html>`;
 }
