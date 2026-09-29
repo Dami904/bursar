@@ -24,7 +24,8 @@ export interface RunningWorker {
 /**
  * Starts the worker loop: index vault events, then advance purchases, every tick. Only one worker
  * runs at a time (a Postgres advisory lock), so releases are sent one after another from a single
- * operator key and nonces can't collide. Returns null if another worker holds the lock.
+ * operator key and nonces can't collide. Returns null if another worker holds the lock (the caller
+ * retries).
  */
 export async function startWorker(env: WorkerEnv): Promise<RunningWorker | null> {
   const { db, client: sql } = createDb(env.DATABASE_URL, { max: 5 });
@@ -33,7 +34,7 @@ export async function startWorker(env: WorkerEnv): Promise<RunningWorker | null>
     { locked: boolean }[]
   >`select pg_try_advisory_lock(${WORKER_LOCK}) as locked`;
   if (row?.locked !== true) {
-    log.warn("another worker holds the lock; not starting");
+    log.warn("another worker holds the lock; waiting for it");
     lockConnection.release();
     await sql.end();
     return null;
