@@ -254,6 +254,17 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
         status,
         ms: Math.round(performance.now() - started),
         role: c.get("principal")?.role ?? null,
+        // TEMPORARY: which forwarding headers Render sends (to pick the client address).
+        ...(c.req.path === "/demo"
+          ? {
+              ipHeaders: {
+                cf: c.req.header("cf-connecting-ip") ?? null,
+                trueClient: c.req.header("true-client-ip") ?? null,
+                xff: c.req.header("x-forwarded-for") ?? null,
+                xReal: c.req.header("x-real-ip") ?? null,
+              },
+            }
+          : {}),
       });
     });
   }
