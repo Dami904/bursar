@@ -4,7 +4,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import type { JobWallet, WalletProvider } from "@bursar/payments";
-import { jobVaultAbi, usdcAbi } from "@bursar/payments";
+import { jobVaultAbi, registerGatewayNetwork, usdcAbi } from "@bursar/payments";
 import {
   decodePaymentSignatureHeader,
   encodePaymentRequiredHeader,
@@ -16,6 +16,7 @@ import {
   http,
   parseAbi,
   parseSignature,
+  recoverTypedDataAddress,
   type Account,
   type Chain,
   type Hex,
@@ -234,6 +235,16 @@ export function localWallets(chain: Chainside): WalletProvider {
       transfers.set(request.idempotencyKey, hash);
       return { id: hash };
     },
+    async execute(request) {
+      const existing = transfers.get(request.idempotencyKey);
+      if (existing !== undefined) return { id: existing };
+      const hash = await chain
+        .wallet(signerAccount)
+        .sendTransaction({ to: request.contract, data: request.data });
+      await chain.client.waitForTransactionReceipt({ hash });
+      transfers.set(request.idempotencyKey, hash);
+      return { id: hash };
+    },
     async transferStatus(id) {
       const receipt = await chain.client.getTransactionReceipt({ hash: id as Hex });
       return { state: receipt.status === "success" ? "COMPLETE" : "FAILED", txHash: id };
@@ -333,6 +344,203 @@ export async function startSeller(
       return state.mode;
     },
     set mode(mode: SellerMode) {
+      state.mode = mode;
+    },
+    stop: () => server.close(),
+  };
+}
+
+/** Stands in for Circle's GatewayWallet on the local chain (deposits into it are plain calls). */
+export const LOCAL_GATEWAY_WALLET: Hex = "0x0000000000000000000000000000000000047a7e";
+
+export interface LocalGatewayTransfer {
+  readonly id: string;
+  readonly from: string;
+  readonly nonce: string;
+  readonly amount: bigint;
+}
+
+export interface LocalGateway {
+  /** The nano seller's origin: it only takes Circle's batched Gateway scheme, at `price`. */
+  readonly url: string;
+  /** What the stand-in Gateway API has received, as Circle's transfers endpoint would list it. */
+  readonly transfers: LocalGatewayTransfer[];
+  /**
+   * normal; refuse: never accepts; accept-then-crash: Gateway takes it, the seller answers 502;
+   * crash: the seller answers 502 before anything reaches Gateway.
+   */
+  mode: "normal" | "refuse" | "accept-then-crash" | "crash";
+  stop(): void;
+}
+
+/**
+ * Circle Gateway on the local chain: a stand-in for its API (balances and x402 transfers) and a
+ * seller that prices in it, registered as the chain's Gateway network. A wallet's Gateway balance is
+ * its USDC allowance to the stand-in GatewayWallet (what a float's approve and deposit leave behind)
+ * less what it has paid through Gateway.
+ */
+export async function startGateway(chain: Chainside, price = 1_000n): Promise<LocalGateway> {
+  const network = `eip155:${chain.client.chain?.id ?? 31337}`;
+  const transfers: LocalGatewayTransfer[] = [];
+  const state: { mode: LocalGateway["mode"] } = { mode: "normal" };
+  let url = "";
+  const balanceOf = async (depositor: string) => {
+    const allowance = await chain.client.readContract({
+      address: chain.usdc,
+      abi: parseAbi(["function allowance(address owner, address spender) view returns (uint256)"]),
+      functionName: "allowance",
+      args: [depositor as Hex, LOCAL_GATEWAY_WALLET],
+    });
+    const spent = transfers
+      .filter((t) => t.from.toLowerCase() === depositor.toLowerCase())
+      .reduce((sum, t) => sum + t.amount, 0n);
+    return allowance - spent;
+  };
+  const decimal = (micros: bigint) =>
+    `${micros / 1_000_000n}.${(micros % 1_000_000n).toString().padStart(6, "0")}`;
+  const read = (req: import("node:http").IncomingMessage) =>
+    new Promise<string>((resolve) => {
+      let body = "";
+      req.on("data", (chunk: Buffer) => (body += chunk.toString()));
+      req.on("end", () => resolve(body));
+    });
+
+  const server: Server = createServer((req, res) => {
+    void (async () => {
+      const path = new URL(req.url ?? "/", "http://local").pathname;
+      if (req.method === "POST" && path === "/v1/balances") {
+        const body = JSON.parse(await read(req)) as { sources: { depositor: string }[] };
+        const depositor = body.sources[0]!.depositor;
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(
+          JSON.stringify({ balances: [{ balance: decimal(await balanceOf(depositor)) }] }),
+        );
+      }
+      if (req.method === "GET" && path === "/v1/x402/transfers") {
+        const query = new URL(req.url ?? "/", "http://local").searchParams;
+        const from = query.get("from")?.toLowerCase();
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(
+          JSON.stringify({
+            transfers: transfers
+              .filter((t) => t.from.toLowerCase() === from)
+              .map((t) => ({
+                ...t,
+                amount: t.amount.toString(),
+                status: "received",
+                txHash: null,
+              })),
+          }),
+        );
+      }
+      const requirements = {
+        scheme: "exact",
+        network: network as `${string}:${string}`,
+        amount: price.toString(),
+        asset: chain.usdc,
+        payTo: accounts.seller.address,
+        maxTimeoutSeconds: 604_900,
+        extra: {
+          name: "GatewayWalletBatched",
+          version: "1",
+          verifyingContract: LOCAL_GATEWAY_WALLET,
+        },
+      };
+      const header = req.headers["payment-signature"];
+      if (typeof header !== "string" || state.mode === "refuse") {
+        res.writeHead(402, {
+          "PAYMENT-REQUIRED": encodePaymentRequiredHeader({
+            x402Version: 2,
+            resource: {
+              url: `${url}${req.url}`,
+              description: "nano",
+              mimeType: "application/json",
+            },
+            accepts: [requirements],
+          }),
+        });
+        return res.end("{}");
+      }
+      if (state.mode === "crash") {
+        res.writeHead(502);
+        return res.end("bad gateway");
+      }
+      // What Circle checks before taking a batched payment: signer, payee, amount, balance.
+      const payment = decodePaymentSignatureHeader(header);
+      const payload = payment.payload as { signature: Hex; authorization: Record<string, string> };
+      const auth = payload.authorization;
+      const signer = await recoverTypedDataAddress({
+        domain: {
+          name: "GatewayWalletBatched",
+          version: "1",
+          chainId: chain.client.chain?.id ?? 31337,
+          verifyingContract: LOCAL_GATEWAY_WALLET,
+        },
+        types: {
+          TransferWithAuthorization: [
+            { name: "from", type: "address" },
+            { name: "to", type: "address" },
+            { name: "value", type: "uint256" },
+            { name: "validAfter", type: "uint256" },
+            { name: "validBefore", type: "uint256" },
+            { name: "nonce", type: "bytes32" },
+          ],
+        },
+        primaryType: "TransferWithAuthorization",
+        message: {
+          from: auth.from as Hex,
+          to: auth.to as Hex,
+          value: BigInt(auth.value!),
+          validAfter: BigInt(auth.validAfter!),
+          validBefore: BigInt(auth.validBefore!),
+          nonce: auth.nonce as Hex,
+        },
+        signature: payload.signature,
+      });
+      const amount = BigInt(auth.value!);
+      if (
+        signer.toLowerCase() !== auth.from!.toLowerCase() ||
+        auth.to!.toLowerCase() !== accounts.seller.address.toLowerCase() ||
+        amount !== price ||
+        (await balanceOf(auth.from!)) < amount
+      ) {
+        res.writeHead(402, { "content-type": "application/json" });
+        return res.end('{"error":"payment rejected by Gateway"}');
+      }
+      const transfer = { id: crypto.randomUUID(), from: auth.from!, nonce: auth.nonce!, amount };
+      transfers.push(transfer);
+      if (state.mode === "accept-then-crash") {
+        res.writeHead(502);
+        return res.end("bad gateway");
+      }
+      res.writeHead(200, {
+        "PAYMENT-RESPONSE": encodePaymentResponseHeader({
+          success: true,
+          transaction: transfer.id,
+          network: requirements.network,
+          payer: auth.from!,
+        }),
+      });
+      res.end('{"insight":"nano-paid"}');
+    })().catch((error: unknown) => {
+      res.writeHead(500);
+      res.end(String(error));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  registerGatewayNetwork(network, {
+    gatewayWallet: LOCAL_GATEWAY_WALLET,
+    domain: 0,
+    apiUrl: `${url}/v1`,
+  });
+  return {
+    url,
+    transfers,
+    get mode() {
+      return state.mode;
+    },
+    set mode(mode: LocalGateway["mode"]) {
       state.mode = mode;
     },
     stop: () => server.close(),

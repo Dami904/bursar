@@ -1,0 +1,53 @@
+Some things an agent buys cost less than a cent: a sound cue, a caption, one API call. Paying for each of those with its own on-chain transaction makes no sense, because the transaction would be most of the price. Bursar pays for them through **Circle Gateway** (Circle's Nanopayments), under exactly the same job budget and rules as every other payment.
+
+Nothing changes for the agent. It buys with the same `buy` tool or `POST /v1/spend/purchase` call. Bursar reads the seller's price, sees that the seller takes Circle Gateway, and picks the right way to pay.
+
+## How a nanopayment works
+
+Circle Gateway keeps a USDC balance per wallet. A payment from that balance is just a signature: the buyer signs "pay this seller 0.001 USDC", the seller hands the signature to Circle, and Circle confirms it in about a second, with no gas. Circle then settles many of these on Arc together, in one batch.
+
+Bursar gives each job its own Gateway balance, funded from the job's vault:
+
+1. **The first nanopayment.** The agent asks to buy a 0.001 USDC item. Bursar checks it against every rule, as always, and holds it against the budget.
+2. **A small float leaves the vault.** Bursar releases a float (0.10 USDC by default) from the vault to the job's payment wallet. This is an ordinary vault release: it goes through the same on-chain checks as any other payment and appears in the job's history.
+3. **The float goes into Gateway.** The job's payment wallet deposits it into Circle Gateway. Circle credits it after the deposit is final on Arc, about 20 seconds later.
+4. **Each purchase is a signature.** Bursar signs the payment with the job's wallet and sends it to the seller. Circle confirms it, and Bursar checks with Circle directly that it received the payment before marking it paid.
+5. **Later purchases skip steps 2 and 3.** They're paid straight from the float in about a second each, until it runs low and Bursar tops it up the same way.
+
+## How it counts against the budget
+
+The float counts against the job's budget **in full** the moment it leaves the vault, even before any of it is spent. Nanopayments paid from it don't count a second time: they move money from the float into **Paid**.
+
+So a job with a 1.00 USDC budget, a 0.10 float and two 0.001 purchases shows:
+
+| Budget bar | Amount |
+|---|---|
+| **Paid** | 0.002 |
+| **Gateway balance** | 0.098 |
+| **Left** | 0.90 |
+
+This means a job can never spend past its budget through Gateway, even in theory: everything that could be spent there was already counted when it left the vault. The database enforces the same sum: a float that would push a job over its budget is refused.
+
+A float is never bigger than the job's per-payment cap or its approval threshold, and never bigger than what's left in the budget. A job with a 0.05 cap gets 0.05 floats.
+
+## The rules still apply
+
+Every nanopayment is a decision like any other, checked in the same order against the same rules: the seller must be on the job's allow-list, the agent must be within its limit, the payment must fit the job's caps, and anything above the approval threshold waits for you. Each one gets an evidence page and an entry in the audit log.
+
+On the evidence page, a nanopayment shows **Paid through Circle Gateway** with Circle's transfer id instead of an Arc transaction. The float's vault release and its deposit into Gateway are real Arc transactions, shown on the job.
+
+## When something goes wrong
+
+- **The seller refuses the payment.** Nothing was paid. The amount goes back to the job's Gateway balance, ready for the next purchase.
+- **The seller goes silent after the payment was sent.** Bursar asks Circle. If Circle received it, it's paid. If Circle has no record of it after 10 minutes, the amount goes back to the job's Gateway balance. Holding it longer would protect nothing, because the float was already counted in full.
+- **The float can't be funded.** If the job's caps or remaining budget are too small to cover the payment, it's returned to the budget with the reason, and nothing leaves the vault.
+
+## Selling with nanopayments
+
+Any x402 seller that takes Circle Gateway works. With Circle's `@circle-fin/x402-batching` package, a seller's price is marked as Gateway-only and Bursar pays it through Gateway automatically. If a seller offers both a normal payment and Gateway for the same item, Bursar pays the normal way, straight from the vault.
+
+The demo seller, [Scenestock](https://scenestock.vercel.app), sells sound cues and captions at 0.001 and 0.002 USDC this way.
+
+## Gas
+
+Gas on Arc is paid in USDC, so there's no separate gas token to manage and nothing like a paymaster is needed. Bursar tops up the job's payment wallet with a little gas for the deposit into Gateway. The nanopayments themselves cost no gas at all.

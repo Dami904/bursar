@@ -49,6 +49,23 @@ export const authorizationStateEnum = pgEnum("authorization_state", [
   "REJECTED",
 ]);
 
+/**
+ * How a payment moves. VAULT: JobVault releases exactly this payment (x402 through the job
+ * wallet, or an invoice straight to the vendor). GATEWAY: a sub-cent x402 payment signed against
+ * the job's Circle Gateway balance and settled by Circle in a batch; the vault released that
+ * balance earlier as a float (see gatewayFloats).
+ */
+export const paymentRailEnum = pgEnum("payment_rail", ["VAULT", "GATEWAY"]);
+/** A Gateway float, from vault release to money the job can spend in Gateway. */
+export const gatewayFloatStateEnum = pgEnum("gateway_float_state", [
+  "RELEASING",
+  "FUNDED",
+  "DEPOSITING",
+  "CREDITING",
+  "ACTIVE",
+  "FAILED",
+]);
+
 export const owners = pgTable("owners", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
@@ -125,6 +142,14 @@ export const jobs = pgTable(
     llmCostMicros: money("llm_cost_micros")
       .notNull()
       .default(sql`0`),
+    /** Released from the vault into the job's Circle Gateway balance (floats), in total. */
+    gatewayFunded: money("gateway_funded")
+      .notNull()
+      .default(sql`0`),
+    /** Gateway-rail payments drawing on that balance (reserved, in flight, stuck or settled). */
+    gatewayDrawn: money("gateway_drawn")
+      .notNull()
+      .default(sql`0`),
     createdAt: at("created_at").notNull().defaultNow(),
   },
   (t) => [
@@ -132,12 +157,13 @@ export const jobs = pgTable(
     uniqueIndex("jobs_vault_job_idx").on(t.vaultJobId),
     check(
       "jobs_counters_non_negative",
-      sql`${t.deposited} >= 0 AND ${t.settled} >= 0 AND ${t.reserved} >= 0 AND ${t.pending} >= 0 AND ${t.unresolved} >= 0 AND ${t.windowSpent} >= 0`,
+      sql`${t.deposited} >= 0 AND ${t.settled} >= 0 AND ${t.reserved} >= 0 AND ${t.pending} >= 0 AND ${t.unresolved} >= 0 AND ${t.windowSpent} >= 0 AND ${t.gatewayFunded} >= 0 AND ${t.gatewayDrawn} >= 0`,
     ),
-    // The budget rule, enforced by Postgres as a backstop to the policy engine.
+    // The budget rule, enforced by Postgres as a backstop to the policy engine. Unspent Gateway
+    // float has already left the vault, so it counts too.
     check(
       "jobs_budget_invariant",
-      sql`${t.settled} + ${t.reserved} + ${t.pending} + ${t.unresolved} <= ${t.budget}`,
+      sql`${t.settled} + ${t.reserved} + ${t.pending} + ${t.unresolved} + greatest(${t.gatewayFunded} - ${t.gatewayDrawn}, 0) <= ${t.budget}`,
     ),
     check(
       "jobs_limits_positive",
@@ -322,6 +348,9 @@ export const authorizations = pgTable(
     nextAttemptAt: at("next_attempt_at"),
     lastError: text("last_error"),
     resolvedReason: text("resolved_reason"),
+    rail: paymentRailEnum("rail").notNull().default("VAULT"),
+    /** GATEWAY rail: Circle Gateway's transfer id (Circle settles it on-chain later, in a batch). */
+    gatewayTransferId: text("gateway_transfer_id"),
     createdAt: at("created_at").notNull().defaultNow(),
     updatedAt: at("updated_at").notNull().defaultNow(),
   },
@@ -330,6 +359,43 @@ export const authorizations = pgTable(
     index("authorizations_job_state_idx").on(t.jobId, t.state),
     index("authorizations_work_idx").on(t.state, t.nextAttemptAt),
     check("authorizations_amount_positive", sql`${t.amount} > 0`),
+  ],
+);
+
+/**
+ * Money moved from the vault into a job's Circle Gateway balance so sub-cent payments can be paid
+ * off-chain. Each float is one vault release with its own operation id (the indexer matches it
+ * like a payment), then an approve + deposit from the job wallet, then Gateway crediting it.
+ */
+export const gatewayFloats = pgTable(
+  "gateway_floats",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id),
+    amount: money("amount").notNull(),
+    state: gatewayFloatStateEnum("state").notNull().default("RELEASING"),
+    vaultOpId: text("vault_op_id").notNull(),
+    vaultTx: text("vault_tx"),
+    vaultTxNonce: integer("vault_tx_nonce"),
+    vaultTxSentAt: at("vault_tx_sent_at"),
+    /** Operator's gas top-up to the job wallet (Arc gas is USDC). */
+    gasTx: text("gas_tx"),
+    /** Circle contract executions from the job wallet. */
+    approveTransferId: text("approve_transfer_id"),
+    depositTransferId: text("deposit_transfer_id"),
+    depositTx: text("deposit_tx"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: at("next_attempt_at"),
+    lastError: text("last_error"),
+    createdAt: at("created_at").notNull().defaultNow(),
+    updatedAt: at("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("gateway_floats_job_idx").on(t.jobId, t.state),
+    uniqueIndex("gateway_floats_op_idx").on(t.vaultOpId),
+    check("gateway_floats_amount_positive", sql`${t.amount} > 0`),
   ],
 );
 

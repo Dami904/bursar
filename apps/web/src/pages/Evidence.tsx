@@ -32,8 +32,10 @@ interface Evidence {
   };
   payment: {
     state: PaymentState;
+    rail?: "VAULT" | "GATEWAY";
     vaultTx: string | null;
     paymentTx: string | null;
+    gatewayTransferId?: string | null;
     reason: string | null;
   } | null;
   approval: {
@@ -120,6 +122,18 @@ export function EvidencePage({ demo = false }: { demo?: boolean }) {
             <TxLink hash={e.payment.vaultTx} />
           </Step>
         )}
+        {e.payment?.rail === "GATEWAY" &&
+          (e.payment.gatewayTransferId || e.payment.state === "SETTLED") && (
+            <Step
+              tone="paid"
+              title="Paid through Circle Gateway"
+              meta={
+                e.payment.gatewayTransferId
+                  ? `Transfer ${e.payment.gatewayTransferId} · settled on Arc in Circle's next batch`
+                  : "Settled on Arc in Circle's next batch"
+              }
+            />
+          )}
         {e.payment?.paymentTx && !sameTx && (
           <Step tone="paid" title="Seller paid">
             <TxLink hash={e.payment.paymentTx} />

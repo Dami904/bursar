@@ -1,4 +1,5 @@
 import { formatUsdc } from "@bursar/money";
+import { gatewayFloatFree } from "@bursar/db";
 import type { agents, authorizations, decisions, jobs } from "@bursar/db";
 import { committedOf } from "../services/spend.js";
 
@@ -32,6 +33,12 @@ export function jobView(job: typeof jobs.$inferSelect) {
     frozenReason: job.frozenReason,
     brief: job.brief,
     operatorRunAt: job.operatorRunAt?.toISOString() ?? null,
+    /** Circle Gateway float for nano payments: moved out of the vault, then drawn on per call. */
+    gateway: {
+      funded: usdc(job.gatewayFunded),
+      drawn: usdc(job.gatewayDrawn),
+      available: usdc(gatewayFloatFree(job)),
+    },
     onChain: {
       vaultJobId: job.vaultJobId,
       agentWallet: job.agentWalletAddress,
@@ -83,10 +90,13 @@ export function authorizationView(auth: typeof authorizations.$inferSelect) {
     id: auth.id,
     state: auth.state,
     amount: usdc(auth.amount),
+    /** VAULT: released from the vault and paid on-chain. GATEWAY: paid through Circle Gateway. */
+    rail: auth.rail,
     paymentUrl: auth.paymentUrl,
     payTo: auth.payTo,
     vaultTx: auth.vaultTx,
     paymentTx: auth.paymentTx,
+    gatewayTransferId: auth.gatewayTransferId,
     deliverable: auth.deliverable,
     reason: auth.resolvedReason,
     updatedAt: auth.updatedAt.toISOString(),

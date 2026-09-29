@@ -10,6 +10,7 @@ import { anchorOnce } from "./anchor.js";
 import { autopilotOnce } from "./autopilot.js";
 import { approveDemoPayments, rotateDemoBrief } from "./demo.js";
 import { executeOnce } from "./executor.js";
+import { floatsOnce } from "./floats.js";
 import { indexOnce } from "./indexer.js";
 import { log } from "./log.js";
 import { reconcileOnce } from "./reconciler.js";
@@ -144,8 +145,30 @@ export async function startWorker(env: WorkerEnv): Promise<RunningWorker | null>
       } catch (error) {
         log.error("indexer tick failed", error);
       }
+      const network = `eip155:${chain.id}`;
       try {
-        await executeOnce({ db, client, operator, vault, usdc: env.USDC_ADDRESS as Hex, wallets });
+        await floatsOnce({
+          db,
+          client,
+          operator,
+          vault,
+          usdc: env.USDC_ADDRESS as Hex,
+          wallets,
+          network,
+        });
+      } catch (error) {
+        log.error("gateway floats tick failed", error);
+      }
+      try {
+        await executeOnce({
+          db,
+          client,
+          operator,
+          vault,
+          usdc: env.USDC_ADDRESS as Hex,
+          wallets,
+          network,
+        });
       } catch (error) {
         log.error("executor tick failed", error);
       }
@@ -157,6 +180,7 @@ export async function startWorker(env: WorkerEnv): Promise<RunningWorker | null>
           vault,
           usdc: env.USDC_ADDRESS as Hex,
           wallets,
+          network,
           sweepIntervalMs: env.WORKER_SWEEP_INTERVAL_MS,
         });
       } catch (error) {

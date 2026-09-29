@@ -32,6 +32,8 @@ export function BudgetBar({ job, legend = true }: { job: Job; legend?: boolean }
     { tone: "held", value: job.reserved, label: "Held" },
     { tone: "needs", value: job.pendingApproval, label: "Needs you" },
     { tone: "stuck", value: job.unresolved, label: "Stuck" },
+    // Moved to the job's Circle Gateway balance for nano payments, not yet spent.
+    { tone: "muted", value: job.gateway?.available ?? "0", label: "Gateway balance" },
   ];
   return (
     <div>

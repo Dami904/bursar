@@ -1,5 +1,6 @@
+import { BatchFacilitatorClient, GatewayEvmScheme } from "@circle-fin/x402-batching/server";
 import { encodePaymentRequiredHeader } from "@x402/core/http";
-import { x402ResourceServer } from "@x402/core/server";
+import { x402ResourceServer, type FacilitatorClient } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { paymentMiddleware } from "@x402/hono";
 import { Hono } from "hono";
@@ -24,6 +25,17 @@ export function createSellerApp(env: SellerEnv) {
     network,
     new ExactEvmScheme(),
   );
+
+  // Nanopayments: sub-cent prices paid through Circle Gateway, which verifies each signed payment
+  // off-chain and settles them on Arc in batches. Circle's client defaults to mainnet.
+  const gatewayServer = new x402ResourceServer(
+    new BatchFacilitatorClient({
+      url:
+        env.ARC_CHAIN_ID === 5042002
+          ? "https://gateway-api-testnet.circle.com"
+          : "https://gateway-api.circle.com",
+    }) as unknown as FacilitatorClient, // same interface; Circle bundles its own x402 types
+  ).register(network, new GatewayEvmScheme() as unknown as ExactEvmScheme);
 
   const usdcPrice = (units: string) => ({
     amount: units,
@@ -76,19 +88,47 @@ export function createSellerApp(env: SellerEnv) {
     },
   ] as const;
 
+  /** Sub-cent resources, sold only through Circle Gateway (too small to settle one by one). */
+  const nanoProducts = [
+    {
+      path: "/v1/nano/sound-cue",
+      units: "1000",
+      description: "One sound cue for a film scene (nanopayment, Circle Gateway)",
+      body: () => ({
+        cue: pick([
+          "Low synth swell under the vault reveal, 4 seconds.",
+          "Soft keyboard clicks, office ambience, fade in.",
+          "A single bright chime as the payment clears.",
+        ]),
+      }),
+    },
+    {
+      path: "/v1/nano/caption",
+      units: "2000",
+      description: "One on-screen caption for a film scene (nanopayment, Circle Gateway)",
+      body: () => ({
+        caption: pick([
+          "Every payment, checked.",
+          "Budgets per job, not per company.",
+          "Signed by a human above the line.",
+        ]),
+      }),
+    },
+  ] as const;
+
   function pick<T>(items: readonly T[]): T {
     return items[Math.floor(Math.random() * items.length)] as T;
   }
 
   const app = new Hono()
     // A storefront for people who open the address in a browser. Agents use the catalog below.
-    .get("/", (c) => c.html(storefront(products, seller.address)))
+    .get("/", (c) => c.html(storefront([...products, ...nanoProducts], seller.address)))
     .get("/health", (c) => c.json({ status: "ok", payTo: seller.address, network }))
     // The catalog agents read to learn what's for sale (prices come from each URL's 402 quote).
     .get("/.well-known/x402", (c) =>
       c.json({
         x402Version: 2,
-        resources: products.map((p) => ({
+        resources: [...products, ...nanoProducts].map((p) => ({
           url: p.path,
           method: "GET",
           description: p.description,
@@ -141,8 +181,28 @@ export function createSellerApp(env: SellerEnv) {
         ),
         resourceServer,
       ),
+    )
+    .use(
+      paymentMiddleware(
+        Object.fromEntries(
+          nanoProducts.map((p) => [
+            `GET ${p.path}`,
+            {
+              accepts: {
+                scheme: "exact",
+                network,
+                payTo: seller.address,
+                price: `$${(Number(p.units) / 1e6).toFixed(6)}`,
+              },
+              description: p.description,
+              mimeType: "application/json",
+            },
+          ]),
+        ),
+        gatewayServer,
+      ),
     );
-  for (const product of products) {
+  for (const product of [...products, ...nanoProducts]) {
     app.get(product.path, (c) => c.json({ ...product.body(), servedAt: new Date().toISOString() }));
   }
   return { app, payTo: seller.address, network };
@@ -154,6 +214,12 @@ const escape = (text: string) =>
     (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch] ?? ch,
   );
 
+/** "0.01", or "0.001" for sub-cent prices. */
+const formatPrice = (units: string) => {
+  const value = Number(units) / 1e6;
+  return value >= 0.01 ? value.toFixed(2) : String(value);
+};
+
 /** The human-readable front page: what's for sale, the price, and how agents buy it. */
 function storefront(
   items: readonly { path: string; units: string; description: string }[],
@@ -162,7 +228,7 @@ function storefront(
   const rows = items
     .map(
       (p) =>
-        `<tr><td><code>GET ${escape(p.path)}</code></td><td>${escape(p.description)}</td><td class="price">${(Number(p.units) / 1e6).toFixed(2)} USDC</td></tr>`,
+        `<tr><td><code>GET ${escape(p.path)}</code></td><td>${escape(p.description)}</td><td class="price">${formatPrice(p.units)} USDC</td></tr>`,
     )
     .join("");
   return `<!doctype html>
@@ -188,7 +254,7 @@ a{color:var(--ink)}
 <body><main>
 <div class="kicker">x402 seller · Arc testnet</div>
 <h1>Scenestock</h1>
-<p>Film assets for AI agents: script lines, stock image briefs and market reports, paid per request in USDC with <a href="https://www.x402.org">x402</a>. Each URL answers <code>402 Payment Required</code> with its price; pay and it delivers.</p>
+<p>Film assets for AI agents: script lines, stock image briefs and market reports, paid per request in USDC with <a href="https://www.x402.org">x402</a>. Sub-cent items (sound cues, captions) are nanopayments through Circle Gateway: signed off-chain, settled on Arc in batches. Each URL answers <code>402 Payment Required</code> with its price; pay and it delivers.</p>
 <div class="wrap"><table><thead><tr><th>Resource</th><th>What you get</th><th>Price</th></tr></thead><tbody>${rows}</tbody></table></div>
 <p>Catalog for agents: <a href="/.well-known/x402"><code>/.well-known/x402</code></a>. Payments go to <code>${escape(payTo)}</code>, settled by Circle's facilitator on Arc testnet.</p>
 <p>Scenestock is the seller in <a href="https://bursarhq.vercel.app/demo">Bursar's live demo</a>, where an AI operator buys from it within a job's budget.</p>

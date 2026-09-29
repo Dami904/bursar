@@ -35,7 +35,9 @@ export const bucketOf: Record<AuthorizationState, Bucket | null> = {
 
 const legal: Readonly<Record<AuthorizationState, readonly AuthorizationState[]>> = {
   PENDING_APPROVAL: ["RESERVED", "REJECTED"],
-  RESERVED: ["RELEASING", "RELEASED"],
+  // RESERVED -> SIGNING is the Gateway rail: a sub-cent payment signed against the job's Gateway
+  // balance, with no vault release of its own (the vault released that balance as a float).
+  RESERVED: ["RELEASING", "SIGNING", "RELEASED"],
   // RELEASING -> SETTLED is the direct-payee path (invoice paid straight from the vault).
   RELEASING: ["FUNDED_WALLET", "SETTLED", "UNRESOLVED", "RELEASED"],
   FUNDED_WALLET: ["SIGNING", "RELEASED"],

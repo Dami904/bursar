@@ -1,7 +1,9 @@
 import {
   authorizations,
   approvals,
+  committedOf,
   createDb,
+  gatewayFloats,
   decisions,
   jobs,
   verifyChain,
@@ -28,6 +30,7 @@ import { requestSpend } from "../../api/src/services/spend.js";
 import { testDatabaseUrl } from "../../api/test/global-setup.js";
 import { anchorOnce, type AnchorDeps } from "../src/anchor.js";
 import { executeOnce, type ExecutorDeps } from "../src/executor.js";
+import { floatsOnce, floatSize } from "../src/floats.js";
 import { indexOnce } from "../src/indexer.js";
 import { reconcileOnce } from "../src/reconciler.js";
 import {
@@ -35,13 +38,16 @@ import {
   localWallets,
   openVaultJob,
   startChain,
+  startGateway,
   startSeller,
   type Chainside,
+  type LocalGateway,
   type LocalSeller,
 } from "./harness.js";
 
 let chain: Chainside;
 let seller: LocalSeller;
+let gateway: LocalGateway;
 let db: Db;
 let end: () => Promise<void>;
 let deps: ExecutorDeps;
@@ -49,6 +55,7 @@ let deps: ExecutorDeps;
 beforeAll(async () => {
   chain = await startChain();
   seller = await startSeller(chain);
+  gateway = await startGateway(chain);
   const created = createDb(testDatabaseUrl(), { max: 5 });
   db = created.db;
   end = () => created.client.end();
@@ -59,18 +66,22 @@ beforeAll(async () => {
     vault: chain.vault,
     usdc: chain.usdc,
     wallets: localWallets(chain),
+    network: "eip155:31337",
     receiptTimeoutMs: 3_000,
   };
 });
 
 afterAll(async () => {
   seller.stop();
+  gateway.stop();
   chain.stop();
   await end();
 });
 
 beforeEach(async () => {
   seller.mode = "normal";
+  gateway.mode = "normal";
+  gateway.transfers.length = 0;
   await db.execute(
     sql`TRUNCATE owners, jobs, agents, credentials, payees, category_limits, decisions, authorizations, chain_events, chain_cursors, approvers, approvals, operator_runs, metrics_daily, audit_chain, audit_anchors, siwe_nonces, alert_targets, alerts, telegram_links RESTART IDENTITY CASCADE`,
   );
@@ -108,7 +119,7 @@ async function runUntil(
 }
 
 /** Owner creates a job over the API services, funds it in the vault, and the indexer activates it. */
-async function liveJob(options: { threshold?: bigint } = {}) {
+async function liveJob(options: { threshold?: bigint; payees?: string[] } = {}) {
   const { owner } = await createOwner(db, "Studio");
   const job = await createJob(
     db,
@@ -133,7 +144,9 @@ async function liveJob(options: { threshold?: bigint } = {}) {
     fund: parseUsdc("1.00"),
   });
   await index();
-  await addPayee(db, owner.id, job.id, { kind: "X402_ORIGIN", value: seller.url });
+  for (const payee of options.payees ?? [seller.url]) {
+    await addPayee(db, owner.id, job.id, { kind: "X402_ORIGIN", value: payee });
+  }
   const { agent } = await createAgent(db, owner.id, job.id, { name: "Operator", role: "operator" });
   const principal: AgentPrincipal = {
     role: "AGENT",
@@ -149,7 +162,7 @@ async function liveJob(options: { threshold?: bigint } = {}) {
 async function purchase(
   principal: AgentPrincipal,
   operationId: string,
-  from: LocalSeller = seller,
+  from: { readonly url: string } = seller,
 ) {
   const q = await quote(`${from.url}/insight`, {
     network: `eip155:${chain.client.chain?.id ?? 31337}`,
@@ -162,6 +175,7 @@ async function purchase(
     payee: { kind: "X402_ORIGIN", value: q.url },
     amount: q.amount,
     reasoning: "worker test",
+    rail: q.rail,
     payment: {
       url: q.url,
       quote: { paymentRequired: q.paymentRequired, requirements: q.requirements },
@@ -673,5 +687,132 @@ describe("audit anchor", () => {
     const before = await latestSeq();
     expect(await anchorOnce(anchorDeps())).toBeNull();
     expect(await latestSeq()).toBe(before);
+  });
+});
+
+describe("Circle Gateway nano lane", () => {
+  /** One worker tick as production runs it: index, floats, then payments (no back-off waits). */
+  const tick = async () => {
+    await db.update(authorizations).set({ nextAttemptAt: null });
+    await db.update(gatewayFloats).set({ nextAttemptAt: null });
+    await index();
+    await floatsOnce(deps);
+    await executeOnce(deps);
+  };
+  const nanoJob = () => liveJob({ payees: [gateway.url] });
+  const floatsOf = (jobId: string) =>
+    db.select().from(gatewayFloats).where(eq(gatewayFloats.jobId, jobId));
+
+  it("sizes a float to the smallest of target, caps and headroom", () => {
+    const job = {
+      budget: 1_000_000n,
+      deposited: 1_000_000n,
+      perTxCap: 500_000n,
+      approvalThreshold: 500_000n,
+      settled: 0n,
+      reserved: 1_000n,
+      pending: 0n,
+      unresolved: 0n,
+      gatewayFunded: 0n,
+      gatewayDrawn: 1_000n,
+    };
+    expect(floatSize(job, 100_000n)).toEqual({ amount: 100_000n, shortfall: 1_000n });
+    expect(floatSize({ ...job, perTxCap: 50_000n }, 100_000n).amount).toBe(50_000n);
+    expect(floatSize({ ...job, approvalThreshold: 20_000n }, 100_000n).amount).toBe(20_000n);
+    // Only 0.03 of budget left beyond what's committed: the float stops there.
+    expect(floatSize({ ...job, settled: 969_000n }, 100_000n).amount).toBe(31_000n);
+    // Caps below the waiting payment: a float too small to cover it (the payment is released).
+    const starved = floatSize({ ...job, perTxCap: 500n }, 100_000n);
+    expect(starved.amount).toBeLessThan(starved.shortfall);
+    expect(floatSize({ ...job, gatewayFunded: 100_000n }, 100_000n).shortfall).toBe(0n);
+  });
+
+  it("funds a float from the vault once, then pays each nano purchase from it", async () => {
+    const { job, principal } = await nanoJob();
+    const first = await purchase(principal, "op-nano-000001", gateway);
+    expect(first.rail).toBe("GATEWAY");
+    expect(first.state).toBe("RESERVED");
+
+    const settled = await runUntil(first.id, ["SETTLED", "RELEASED"], tick, 16);
+    expect(settled.state).toBe("SETTLED");
+    expect(settled.gatewayTransferId).toBe(gateway.transfers[0]!.id);
+    expect(settled.deliverable).toContain("nano-paid");
+
+    const second = await purchase(principal, "op-nano-000002", gateway);
+    expect((await runUntil(second.id, ["SETTLED", "RELEASED"], tick, 8)).state).toBe("SETTLED");
+
+    for (let i = 0; i < 4 && (await floatsOf(job.id))[0]?.state !== "ACTIVE"; i += 1) {
+      await tick();
+    }
+    const floats = await floatsOf(job.id);
+    expect(floats).toHaveLength(1);
+    expect(floats[0]!.amount).toBe(parseUsdc("0.10"));
+    expect(floats[0]!.state).toBe("ACTIVE");
+
+    const row = await jobRow(job.id);
+    expect(row.status).toBe("ACTIVE"); // the indexer knew the float's release: no freeze
+    expect(row.gatewayFunded).toBe(parseUsdc("0.10"));
+    expect(row.gatewayDrawn).toBe(parseUsdc("0.002"));
+    expect(row.settled).toBe(parseUsdc("0.002"));
+    // The whole float counts against the budget; the nano payments inside it don't add to it.
+    expect(committedOf(row)).toBe(parseUsdc("0.10"));
+    expect(await vaultAvailable(job.vaultJobId!)).toBe(parseUsdc("0.90"));
+    expect(gateway.transfers.map((t) => t.amount)).toEqual([1_000n, 1_000n]);
+  });
+
+  it("settles a payment Gateway took even when the seller crashed before answering", async () => {
+    const { principal } = await nanoJob();
+    gateway.mode = "accept-then-crash";
+    const auth = await purchase(principal, "op-nano-crash-01", gateway);
+    const done = await runUntil(auth.id, ["SETTLED", "RELEASED", "UNRESOLVED"], tick, 16);
+    expect(done.state).toBe("SETTLED");
+    expect(gateway.transfers).toHaveLength(1); // paid once, never twice
+    expect(done.gatewayTransferId).toBe(gateway.transfers[0]!.id);
+  });
+
+  it("gives a refused nano payment back to the float, with nothing paid", async () => {
+    const { job, principal } = await nanoJob();
+    const auth = await purchase(principal, "op-nano-refuse-1", gateway);
+    gateway.mode = "refuse";
+    const done = await runUntil(auth.id, ["SETTLED", "RELEASED"], tick, 16);
+    expect(done.state).toBe("RELEASED");
+    expect(gateway.transfers).toHaveLength(0);
+    const row = await jobRow(job.id);
+    expect(row.gatewayDrawn).toBe(0n);
+    expect(row.reserved).toBe(0n);
+    expect(committedOf(row)).toBe(row.gatewayFunded); // the float is still there, unspent
+  });
+
+  it("reconciles unresolved nano payments from Gateway's own records", async () => {
+    const { job, principal } = await nanoJob();
+    gateway.mode = "crash";
+    const late = await purchase(principal, "op-nano-unres-01", gateway);
+    const lost = await purchase(principal, "op-nano-unres-02", gateway);
+    expect((await runUntil(late.id, ["UNRESOLVED"], tick, 20)).state).toBe("UNRESOLVED");
+    expect((await runUntil(lost.id, ["UNRESOLVED"], tick, 8)).state).toBe("UNRESOLVED");
+
+    // One of them reached Gateway after all; the other never did.
+    const lateRow = await stateOf(late.id);
+    gateway.transfers.push({
+      id: "late-transfer",
+      from: lateRow.payer!,
+      nonce: lateRow.paymentNonce!,
+      amount: 1_000n,
+    });
+    await reconcile();
+    expect((await stateOf(late.id)).state).toBe("SETTLED");
+    expect((await stateOf(late.id)).gatewayTransferId).toBe("late-transfer");
+    expect((await stateOf(lost.id)).state).toBe("UNRESOLVED"); // Gateway may still receive it
+
+    await db
+      .update(authorizations)
+      .set({ updatedAt: new Date(Date.now() - 11 * 60_000) })
+      .where(eq(authorizations.id, lost.id));
+    await reconcile();
+    expect((await stateOf(lost.id)).state).toBe("RELEASED");
+    const row = await jobRow(job.id);
+    expect(row.unresolved).toBe(0n);
+    expect(row.gatewayDrawn).toBe(parseUsdc("0.001"));
+    expect(row.settled).toBe(parseUsdc("0.001"));
   });
 });

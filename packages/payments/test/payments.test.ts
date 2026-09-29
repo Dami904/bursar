@@ -19,6 +19,18 @@ import {
 const NETWORK = "eip155:5042002";
 const USDC = "0x3600000000000000000000000000000000000000";
 const PAY_TO = "0xc140E91475BfA94C0A7531d8A0CBc018aE1d277e";
+const GATEWAY_WALLET = "0x0077777d7eba4688bdef3e311b846f25870a19b9";
+
+/** A sub-cent option exactly as Circle's Gateway middleware offers it on Arc testnet. */
+const nanoOption = {
+  scheme: "exact",
+  network: NETWORK as `${string}:${string}`,
+  asset: USDC,
+  amount: "1000",
+  payTo: PAY_TO,
+  maxTimeoutSeconds: 604_900,
+  extra: { name: "GatewayWalletBatched", version: "1", verifyingContract: GATEWAY_WALLET },
+} satisfies PaymentRequired["accepts"][number];
 
 const account = privateKeyToAccount(`0x${"11".repeat(32)}`);
 const signer: TypedDataSigner = {
@@ -81,6 +93,24 @@ beforeAll(async () => {
           ),
         });
         return res.end("{}");
+      case "/nano":
+        res.writeHead(402, {
+          "PAYMENT-REQUIRED": encodePaymentRequiredHeader({
+            ...paymentRequired(),
+            accepts: [nanoOption],
+          }),
+        });
+        return res.end("{}");
+      case "/both": {
+        const both = paymentRequired();
+        res.writeHead(402, {
+          "PAYMENT-REQUIRED": encodePaymentRequiredHeader({
+            ...both,
+            accepts: [nanoOption, ...both.accepts],
+          }),
+        });
+        return res.end("{}");
+      }
       case "/free":
         res.writeHead(200);
         return res.end("free");
@@ -145,6 +175,19 @@ describe("quote", () => {
     expect(q.requirements.network).toBe(NETWORK);
   });
 
+  it("takes Circle Gateway when that's all a sub-cent seller offers", async () => {
+    const q = await quote(`${base}/nano`, options);
+    expect(q.rail).toBe("GATEWAY");
+    expect(q.amount).toBe(1_000n);
+  });
+
+  it("prefers a plain on-chain payment when the seller offers both", async () => {
+    const q = await quote(`${base}/both`, options);
+    expect(q.rail).toBe("VAULT");
+    expect(q.amount).toBe(10_000n);
+    expect((await quote(`${base}/insight`, options)).rail).toBe("VAULT");
+  });
+
   it("refuses a seller that doesn't take USDC on our network", async () => {
     await expect(quote(`${base}/wrong-network`, options)).rejects.toThrow(/doesn't accept USDC/);
   });
@@ -199,6 +242,51 @@ describe("signPayment", () => {
       signature: decoded.payload.signature,
     });
     expect(recovered).toBe(account.address);
+  });
+
+  it("signs Gateway payments against Circle's GatewayWallet, not the USDC contract", async () => {
+    const q = await quote(`${base}/nano`, options);
+    const signed = await signPayment(signer, q.paymentRequired, q.requirements);
+    const decoded = JSON.parse(Buffer.from(signed.header, "base64").toString()) as {
+      accepted: { extra: { name: string } };
+      payload: { signature: Hex; authorization: Record<string, string> };
+    };
+    expect(decoded.accepted.extra.name).toBe("GatewayWalletBatched");
+    const auth = decoded.payload.authorization;
+    expect(auth.to).toBe(PAY_TO);
+    expect(auth.value).toBe("1000");
+    // Circle requires at least a week of validity on batched authorizations.
+    expect(Number(auth.validBefore) - Date.now() / 1000).toBeGreaterThan(604_000);
+    const recovered = await recoverTypedDataAddress({
+      domain: {
+        name: "GatewayWalletBatched",
+        version: "1",
+        chainId: 5042002,
+        verifyingContract: GATEWAY_WALLET,
+      },
+      types: {
+        TransferWithAuthorization: [
+          { name: "from", type: "address" },
+          { name: "to", type: "address" },
+          { name: "value", type: "uint256" },
+          { name: "validAfter", type: "uint256" },
+          { name: "validBefore", type: "uint256" },
+          { name: "nonce", type: "bytes32" },
+        ],
+      },
+      primaryType: "TransferWithAuthorization",
+      message: {
+        from: auth.from as Hex,
+        to: auth.to as Hex,
+        value: BigInt(auth.value!),
+        validAfter: BigInt(auth.validAfter!),
+        validBefore: BigInt(auth.validBefore!),
+        nonce: auth.nonce as Hex,
+      },
+      signature: decoded.payload.signature,
+    });
+    expect(recovered).toBe(account.address);
+    expect(signed.payer).toBe(account.address);
   });
 
   it("uses a fresh nonce every time", async () => {

@@ -11,6 +11,8 @@ import {
   type Db,
 } from "@bursar/db";
 import {
+  findGatewayTransfer,
+  gatewayAvailable,
   jobVaultAbi,
   sendPayment,
   signPayment,
@@ -40,6 +42,8 @@ export interface ExecutorDeps {
   readonly vault: Hex;
   readonly usdc: Hex;
   readonly wallets: WalletProvider;
+  /** CAIP-2 network, e.g. "eip155:5042002": where Gateway payments are checked. */
+  readonly network: string;
   /** How long to wait for a release receipt before leaving it for the next tick. */
   readonly receiptTimeoutMs?: number;
 }
@@ -116,7 +120,10 @@ async function advance(deps: ExecutorDeps, id: string, logger: Logger): Promise<
     try {
       switch (auth.state) {
         case "RESERVED":
-          step = await startRelease(deps, auth);
+          step =
+            auth.rail === "GATEWAY"
+              ? await signGateway(deps, auth, job, logger)
+              : await startRelease(deps, auth);
           break;
         case "RELEASING":
           step = await settleRelease(deps, auth, job, logger);
@@ -125,7 +132,10 @@ async function advance(deps: ExecutorDeps, id: string, logger: Logger): Promise<
           step = await signAndPersist(deps, auth, job, logger);
           break;
         case "SIGNING":
-          step = await pay(deps, auth, logger);
+          step =
+            auth.rail === "GATEWAY"
+              ? await payGateway(deps, auth, logger)
+              : await pay(deps, auth, logger);
           break;
         default:
           return;
@@ -433,6 +443,163 @@ async function pay(deps: ExecutorDeps, auth: AuthorizationRow, logger: Logger): 
     case "UNKNOWN": {
       const attempts = auth.attempts + 1;
       logger.warn("payment outcome unknown", { reason: outcome.reason, attempts });
+      if (attempts >= MAX_PAYMENT_ATTEMPTS) {
+        await unresolved(deps, auth, `No answer from the seller after ${attempts} tries`);
+      } else {
+        await annotate(deps.db, auth.id, {
+          attempts,
+          lastError: outcome.reason,
+          nextAttemptAt: new Date(Date.now() + RETRY_DELAY_MS),
+        });
+      }
+      return "wait";
+    }
+  }
+}
+
+/** How long a Gateway payment waits for the job's Gateway balance before it's given up. */
+const GATEWAY_FUNDING_LIMIT_MS = 15 * 60_000;
+
+/**
+ * Gateway rail: no vault release per payment. Once the job's Gateway balance covers it (the float
+ * manager tops it up), sign the batched payment with the job wallet and save it before sending.
+ */
+async function signGateway(
+  deps: ExecutorDeps,
+  auth: AuthorizationRow,
+  job: JobRow,
+  logger: Logger,
+): Promise<Step> {
+  const stored = auth.paymentRequirements as StoredPayment | null;
+  if (stored === null || job.agentWalletId === null || job.agentWalletAddress === null) {
+    throw new Error("Gateway payment is missing its quote or the job has no wallet");
+  }
+  if (BigInt(stored.requirements.amount) !== auth.amount) {
+    throw new Error("Quoted amount no longer matches the reserved amount");
+  }
+  const available = await gatewayAvailable(deps.network, job.agentWalletAddress);
+  if (available < auth.amount) {
+    if (Date.now() - auth.createdAt.getTime() > GATEWAY_FUNDING_LIMIT_MS) {
+      await transition(
+        deps.db,
+        auth.id,
+        "RELEASED",
+        { resolvedReason: "The job's Gateway balance didn't arrive in time; nothing was paid" },
+        { expectFrom: "RESERVED" },
+      );
+      logger.warn("gateway payment released: no balance in time");
+      return "wait";
+    }
+    await annotate(deps.db, auth.id, {
+      lastError: "Waiting for the job's Gateway balance",
+      nextAttemptAt: new Date(Date.now() + 5_000),
+    });
+    return "wait";
+  }
+  const signer = deps.wallets.signer({
+    id: job.agentWalletId,
+    address: job.agentWalletAddress as Hex,
+  });
+  const signed = await signPayment(signer, stored.paymentRequired, stored.requirements);
+  await transition(
+    deps.db,
+    auth.id,
+    "SIGNING",
+    {
+      payer: signed.payer,
+      payTo: stored.requirements.payTo,
+      paymentNonce: signed.nonce,
+      validBefore: signed.validBefore,
+      paymentRequirements: { ...stored, signedHeader: signed.header },
+      attempts: 0,
+      lastError: null,
+    },
+    { expectFrom: "RESERVED" },
+  );
+  logger.info("gateway payment signed", { payer: signed.payer, nonce: signed.nonce });
+  return "next";
+}
+
+/**
+ * Sends a signed Gateway payment. Circle Gateway is the source of truth: a payment is paid when
+ * Gateway has received it (Circle settles it on-chain later, in a batch).
+ */
+async function payGateway(
+  deps: ExecutorDeps,
+  auth: AuthorizationRow,
+  logger: Logger,
+): Promise<Step> {
+  const stored = auth.paymentRequirements as StoredPayment | null;
+  if (
+    stored?.signedHeader === undefined ||
+    auth.payer === null ||
+    auth.paymentNonce === null ||
+    auth.paymentUrl === null
+  ) {
+    throw new Error("SIGNING without a saved Gateway payment");
+  }
+  // Sent before a crash? Then it's paid, and sending it again would only be refused.
+  const earlier = await findGatewayTransfer(deps.network, auth.payer, auth.paymentNonce);
+  if (earlier !== null) {
+    await transition(
+      deps.db,
+      auth.id,
+      "SETTLED",
+      { gatewayTransferId: earlier.id, resolvedReason: "Circle Gateway had already received it" },
+      { expectFrom: "SIGNING" },
+    );
+    return "wait";
+  }
+
+  const outcome = await sendPayment(auth.paymentUrl, stored.signedHeader);
+  switch (outcome.kind) {
+    case "PAID": {
+      // Trust, then verify: the seller's receipt is confirmed with Circle Gateway itself.
+      let transfer = null;
+      for (let i = 0; i < 5 && transfer === null; i += 1) {
+        transfer = await findGatewayTransfer(deps.network, auth.payer, auth.paymentNonce);
+        if (transfer === null) await new Promise((resolve) => setTimeout(resolve, 1_000));
+      }
+      if (transfer !== null) {
+        await transition(
+          deps.db,
+          auth.id,
+          "SETTLED",
+          { gatewayTransferId: transfer.id, deliverable: outcome.body },
+          { expectFrom: "SIGNING" },
+        );
+        logger.info("gateway payment settled", { transferId: transfer.id });
+      } else {
+        await annotate(deps.db, auth.id, {
+          deliverable: outcome.body,
+          nextAttemptAt: new Date(Date.now() + RETRY_DELAY_MS),
+        });
+        logger.warn("seller reports a Gateway payment that Gateway doesn't show yet", {
+          reported: outcome.settlement.transaction,
+        });
+      }
+      return "wait";
+    }
+    case "REFUSED":
+      // Gateway never received it. The float was counted against the budget in full, so even if
+      // this signature were used later it couldn't spend past the budget: release it now.
+      await transition(
+        deps.db,
+        auth.id,
+        "RELEASED",
+        {
+          resolvedReason: `The seller refused the Gateway payment (HTTP ${outcome.status}); nothing was paid`,
+        },
+        { expectFrom: "SIGNING" },
+      );
+      logger.warn("seller refused gateway payment", {
+        status: outcome.status,
+        body: outcome.body.slice(0, 300),
+      });
+      return "wait";
+    case "UNKNOWN": {
+      const attempts = auth.attempts + 1;
+      logger.warn("gateway payment outcome unknown", { reason: outcome.reason, attempts });
       if (attempts >= MAX_PAYMENT_ATTEMPTS) {
         await unresolved(deps, auth, `No answer from the seller after ${attempts} tries`);
       } else {

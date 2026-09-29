@@ -199,6 +199,7 @@ export function DecisionRow({
             <Link to={`${evidenceBase}/${d.id}`} className="underline">
               Evidence
             </Link>
+            {d.rail === "GATEWAY" && <span>Paid through Circle Gateway</span>}
             {d.paymentTx !== null && (
               <a
                 href={txUrl(d.paymentTx)}

@@ -82,6 +82,13 @@ export async function transition(
       );
     }
     await applyJobDelta(tx, auth.jobId, delta);
+    const drawn = gatewayDrawnDelta(auth.rail, auth.state, to, auth.amount);
+    if (drawn !== 0n) {
+      await tx
+        .update(jobs)
+        .set({ gatewayDrawn: sql`${jobs.gatewayDrawn} + ${bigintParam(drawn)}` })
+        .where(eq(jobs.id, auth.jobId));
+    }
 
     if (to === "RELEASED" || to === "REJECTED") {
       // The agent and every ancestor counted this amount; all of them get it back.
@@ -147,6 +154,54 @@ export async function annotate(
     .update(authorizations)
     .set({ ...patch, updatedAt: new Date() })
     .where(eq(authorizations.id, authorizationId));
+}
+
+/** States in which a Gateway-rail payment has a claim on the job's Gateway balance. */
+const DRAWING: readonly AuthorizationState[] = [
+  "PENDING_APPROVAL",
+  "RESERVED",
+  "SIGNING",
+  "UNRESOLVED",
+  "SETTLED",
+];
+
+/**
+ * How a move changes what Gateway-rail payments draw on the job's float: every live state holds
+ * its amount against the float (so it's never counted twice against the budget); released or
+ * rejected, it gives it back.
+ */
+export function gatewayDrawnDelta(
+  rail: "VAULT" | "GATEWAY",
+  from: AuthorizationState,
+  to: AuthorizationState,
+  amount: bigint,
+): bigint {
+  if (rail !== "GATEWAY") return 0n;
+  const before = DRAWING.includes(from);
+  const after = DRAWING.includes(to);
+  return before === after ? 0n : after ? amount : -amount;
+}
+
+/**
+ * What the job has committed: its payment buckets plus Gateway float that has left the vault but
+ * isn't drawn on yet. The budget, the vault and Postgres's CHECK all hold this below the budget.
+ */
+export function committedOf(
+  job: Pick<
+    typeof jobs.$inferSelect,
+    "settled" | "reserved" | "pending" | "unresolved" | "gatewayFunded" | "gatewayDrawn"
+  >,
+): bigint {
+  const float = job.gatewayFunded - job.gatewayDrawn;
+  return job.settled + job.reserved + job.pending + job.unresolved + (float > 0n ? float : 0n);
+}
+
+/** Unspent Gateway float: in the job's Gateway balance, not yet drawn on by a payment. */
+export function gatewayFloatFree(
+  job: Pick<typeof jobs.$inferSelect, "gatewayFunded" | "gatewayDrawn">,
+): bigint {
+  const float = job.gatewayFunded - job.gatewayDrawn;
+  return float > 0n ? float : 0n;
 }
 
 async function applyJobDelta(

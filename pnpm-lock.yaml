@@ -119,6 +119,9 @@ importers:
 
   apps/seller:
     dependencies:
+      '@circle-fin/x402-batching':
+        specifier: 3.5.0
+        version: 3.5.0(@x402/core@2.27.0)(@x402/evm@2.27.0(typescript@6.0.3))(viem@2.56.9(typescript@6.0.3)(zod@4.6.5))
       '@hono/node-server':
         specifier: ^2.1.1
         version: 2.1.1(hono@4.13.9)
@@ -305,6 +308,9 @@ importers:
       '@circle-fin/developer-controlled-wallets':
         specifier: 10.8.1
         version: 10.8.1(@solana/kit@5.5.1(typescript@6.0.3))(debug@4.4.3)
+      '@circle-fin/x402-batching':
+        specifier: 3.5.0
+        version: 3.5.0(@x402/core@2.27.0)(@x402/evm@2.27.0(typescript@6.0.3))(viem@2.56.9(typescript@6.0.3)(zod@4.6.5))
       '@x402/core':
         specifier: 2.27.0
         version: 2.27.0
@@ -361,6 +367,17 @@ packages:
       '@solana/kit':
         optional: true
       '@solana/web3.js':
+        optional: true
+
+  '@circle-fin/x402-batching@3.5.0':
+    resolution: {integrity: sha512-BG4weseV3Q9Qpoo1MmFz588t5PQ210s6KxS1qVs9xEj6V4f771/JMrc7C4q/9pqnokl5wXxSxq6SGcsB5mL9SQ==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      '@x402/core': ^2.3.0
+      '@x402/evm': ^2.3.0
+      viem: ^2.0.0
+    peerDependenciesMeta:
+      '@x402/evm':
         optional: true
 
   '@coinbase/cdp-sdk@1.57.0':
@@ -4396,6 +4413,13 @@ snapshots:
     transitivePeerDependencies:
       - debug
       - supports-color
+
+  '@circle-fin/x402-batching@3.5.0(@x402/core@2.27.0)(@x402/evm@2.27.0(typescript@6.0.3))(viem@2.56.9(typescript@6.0.3)(zod@4.6.5))':
+    dependencies:
+      '@x402/core': 2.27.0
+      viem: 2.56.9(typescript@6.0.3)(zod@4.6.5)
+    optionalDependencies:
+      '@x402/evm': 2.27.0(typescript@6.0.3)
 
   '@coinbase/cdp-sdk@1.57.0(@x402/core@2.27.0)(@x402/evm@2.27.0(typescript@6.0.3))(@x402/extensions@2.27.0(typescript@6.0.3))(typescript@6.0.3)':
     dependencies:

@@ -22,6 +22,12 @@ A purchase that's allowed straight away:
 RESERVED → RELEASING → FUNDED_WALLET → SIGNING → SETTLED
 ```
 
+A [nanopayment](/docs/nanopayments), paid from the job's Circle Gateway balance (no vault release per payment):
+
+```text
+RESERVED → SIGNING → SETTLED
+```
+
 An invoice, paid straight from the vault to the vendor:
 
 ```text
@@ -62,6 +68,7 @@ The budget bar on the job page adds these up:
 | **Held** | `RESERVED`, `RELEASING`, `FUNDED_WALLET`, `SIGNING` |
 | **Needs you** | `PENDING_APPROVAL` |
 | **Stuck** | `UNRESOLVED` |
+| **Gateway balance** | Float moved to Circle Gateway for [nanopayments](/docs/nanopayments), not yet spent |
 | **Left** | The budget minus all of the above |
 
 Everything except "left" counts as committed. That's what `remaining` in [get_budget](/docs/mcp-tools#get_budget) reports, and what every new request is checked against. That's why two agents can never spend the same money.

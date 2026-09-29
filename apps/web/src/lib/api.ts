@@ -97,6 +97,8 @@ export interface Job {
   brief: string | null;
   operatorRunAt: string | null;
   onChain: { vaultJobId: string | null; agentWallet: string | null; policyVersion: number };
+  /** Circle Gateway float for nano payments (absent from older API responses). */
+  gateway?: { funded: string; drawn: string; available: string };
   agents?: number;
   needsYou?: number;
 }
@@ -128,6 +130,8 @@ export interface Decision {
   authorizationId: string | null;
   paymentUrl: string | null;
   paymentTx: string | null;
+  /** VAULT (on-chain per payment) or GATEWAY (Circle Gateway nano payment). */
+  rail?: "VAULT" | "GATEWAY" | null;
 }
 
 export interface Agent {

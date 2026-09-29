@@ -22,6 +22,7 @@
   "dependencies": {
     "@bursar/money": "workspace:*",
     "@circle-fin/developer-controlled-wallets": "10.8.1",
+    "@circle-fin/x402-batching": "3.5.0",
     "@x402/core": "2.27.0",
     "@x402/evm": "2.27.0",
     "viem": "^2.56.9"

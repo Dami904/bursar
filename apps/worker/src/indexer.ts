@@ -1,5 +1,14 @@
-import { authorizations, chainCursors, chainEvents, jobs, type Db, type Tx } from "@bursar/db";
-import { jobVaultAbi, vaultOpIdFor, vaultStatus } from "@bursar/payments";
+import {
+  authorizations,
+  chainCursors,
+  chainEvents,
+  committedOf,
+  gatewayFloats,
+  jobs,
+  type Db,
+  type Tx,
+} from "@bursar/db";
+import { jobVaultAbi, vaultFloatOpIdFor, vaultOpIdFor, vaultStatus } from "@bursar/payments";
 import { and, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import type { Hex, Log, PublicClient } from "viem";
 import { decodeEventLog } from "viem";
@@ -124,7 +133,7 @@ async function applyLog(tx: Tx, entry: Log): Promise<void> {
     case "BudgetChanged": {
       // Mirror the owner's on-chain budget so off-chain decisions match what the vault will allow.
       const budget = args.budget as bigint;
-      const committed = job.settled + job.reserved + job.pending + job.unresolved;
+      const committed = committedOf(job);
       if (budget < committed) {
         log.warn("on-chain budget is below what's already committed; keeping the higher budget", {
           jobId: job.id,
@@ -174,7 +183,15 @@ async function applyLog(tx: Tx, entry: Log): Promise<void> {
         .select({ id: authorizations.id })
         .from(authorizations)
         .where(eq(authorizations.jobId, job.id));
-      if (!payments.some((p) => vaultOpIdFor(p.id).toLowerCase() === opId)) {
+      // Gateway floats are releases too: the job's money moving into its own Gateway balance.
+      const floats = await tx
+        .select({ id: gatewayFloats.id })
+        .from(gatewayFloats)
+        .where(eq(gatewayFloats.jobId, job.id));
+      const known =
+        payments.some((p) => vaultOpIdFor(p.id).toLowerCase() === opId) ||
+        floats.some((f) => vaultFloatOpIdFor(f.id).toLowerCase() === opId);
+      if (!known) {
         const reason = `The vault paid ${String(args.amount)} base units to ${String(args.to)} (operation ${opId}, tx ${entry.transactionHash}) with no matching Bursar payment`;
         await tx
           .update(jobs)

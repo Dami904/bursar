@@ -32,6 +32,8 @@ describe("transitionDelta", () => {
       ["RESERVED", "RELEASING"],
       ["RELEASING", "FUNDED_WALLET"],
       ["FUNDED_WALLET", "SIGNING"],
+      // Gateway payments skip the vault: they sign straight from the job's Gateway float.
+      ["RESERVED", "SIGNING"],
     ] as const) {
       expect(transitionDelta(from, to, 5n)).toEqual({
         pending: 0n,

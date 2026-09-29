@@ -13,8 +13,10 @@ import {
   authorizations,
   categoryLimits,
   commitAlongLineage,
+  committedOf,
   decisionPayload,
   decisions,
+  gatewayFloatFree,
   jobs,
   lineage,
   payees,
@@ -39,11 +41,12 @@ export interface SpendInput {
   readonly invoiceRef?: string | undefined;
   /** For purchases: the exact URL asked for. */
   readonly resourceUrl?: string | undefined;
+  /** GATEWAY: a sub-cent payment from the job's Gateway balance. Default VAULT. */
+  readonly rail?: "VAULT" | "GATEWAY" | undefined;
 }
 
 type DecisionRow = typeof decisions.$inferSelect;
 type AuthorizationRow = typeof authorizations.$inferSelect;
-type JobRow = typeof jobs.$inferSelect;
 
 export interface SpendResult {
   /** True when this operation ID was already decided and the stored decision was returned. */
@@ -54,9 +57,7 @@ export interface SpendResult {
 
 const bigintParam = (value: bigint) => sql`${value.toString()}::bigint`;
 
-export function committedOf(job: Pick<JobRow, "settled" | "reserved" | "pending" | "unresolved">) {
-  return job.settled + job.reserved + job.pending + job.unresolved;
-}
+export { committedOf } from "@bursar/db";
 
 /**
  * Decides a spend request and, if allowed, reserves the money, all in one transaction.
@@ -117,6 +118,16 @@ export async function requestSpend(
             .where(and(eq(categoryLimits.jobId, job.id), eq(categoryLimits.category, category)));
 
     const committed = committedOf(job);
+    const rail = input.rail ?? "VAULT";
+    // A Gateway payment the unspent float already covers moves money from "float" to "payment";
+    // only the part the float doesn't cover is new spending against the budget.
+    const covered =
+      rail === "GATEWAY"
+        ? (() => {
+            const free = gatewayFloatFree(job);
+            return free < input.amount ? free : input.amount;
+          })()
+        : 0n;
     const outcome: PolicyOutcome = evaluatePolicy({
       job: {
         id: job.id,
@@ -125,7 +136,7 @@ export async function requestSpend(
         expiresAt: job.expiresAt,
         budget: job.budget,
         deposited: job.deposited,
-        committed,
+        committed: committed - covered,
         perTxCap: job.perTxCap,
         approvalThreshold: job.approvalThreshold,
         windowCap: job.windowCap,
@@ -174,7 +185,7 @@ export async function requestSpend(
         result: outcome.outcome,
         reason: outcome.outcome === "DENIED" ? outcome.reason : null,
         checks: outcome.checks,
-        remainingAtDecision: job.budget - committed - (counts ? input.amount : 0n),
+        remainingAtDecision: job.budget - committed - (counts ? input.amount - covered : 0n),
         // The on-chain rules this was decided under; the vault rejects the release if they changed.
         policyVersion: job.policyVersion,
       })
@@ -199,6 +210,10 @@ export async function requestSpend(
       .set({
         [state === "RESERVED" ? "reserved" : "pending"]:
           sql`${bucket} + ${bigintParam(input.amount)}`,
+        // A Gateway payment holds its amount against the job's float from the start.
+        ...(rail === "GATEWAY"
+          ? { gatewayDrawn: sql`${jobs.gatewayDrawn} + ${bigintParam(input.amount)}` }
+          : {}),
         windowStart: window.start,
         windowSpent: window.spent + input.amount,
       })
@@ -223,6 +238,7 @@ export async function requestSpend(
         // An address payee is paid straight from the vault (an invoice): the release is the payment.
         payTo: input.payee.kind === "ADDRESS" ? payeeValue : null,
         paymentRequirements: input.payment?.quote ?? null,
+        rail,
       })
       .returning();
     return { replayed: false, decision, authorization: authorization ?? null };

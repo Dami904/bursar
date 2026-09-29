@@ -78,6 +78,13 @@
       "when": 1790627284997,
       "tag": "0010_day10_resource_url",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1790691360409,
+      "tag": "0011_day11_gateway",
+      "breakpoints": true
     }
   ]
 }

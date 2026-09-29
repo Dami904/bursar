@@ -66,6 +66,11 @@ export const docSections: readonly DocSection[] = [
         "Let agents pay a vendor's invoice straight from the job's funds.",
       ),
       page(
+        "nanopayments",
+        "Nanopayments",
+        "Sub-cent purchases paid through Circle Gateway, under the same budget and rules.",
+      ),
+      page(
         "alerts",
         "Alerts and Telegram",
         "Hear about approvals, stuck payments and blocked agents where you are.",

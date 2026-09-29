@@ -75,6 +75,8 @@ export async function jobDecisions(db: Db, ownerId: string, jobId: string, limit
     /** For purchases: the exact resource bought (the payee is only its origin). */
     paymentUrl: auth?.paymentUrl ?? d.resourceUrl ?? null,
     paymentTx: auth?.paymentTx ?? null,
+    /** VAULT or GATEWAY (a Circle Gateway nano payment, with no per-payment transaction). */
+    rail: auth?.rail ?? null,
   }));
 }
 

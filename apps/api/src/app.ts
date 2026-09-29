@@ -732,6 +732,7 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
         url: quoted.url,
         quote: { paymentRequired: quoted.paymentRequired, requirements: quoted.requirements },
       },
+      rail: quoted.rail,
     });
     return respondWithOutcome(c, result);
   });

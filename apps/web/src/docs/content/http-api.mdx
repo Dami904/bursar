@@ -144,9 +144,11 @@ The response:
     "state": "SETTLED",
     "amount": "0.15",
     "paymentUrl": "https://api.seller.com/v1/market-report",
+    "rail": "VAULT",
     "payTo": "0xc140E914…",
     "vaultTx": "0x…",
     "paymentTx": "0x…",
+    "gatewayTransferId": null,
     "deliverable": "{\"report\":\"…\"}",
     "reason": null,
     "updatedAt": "2026-09-28T20:47:39.102Z"
@@ -154,7 +156,7 @@ The response:
 }
 ```
 
-`payee` is the seller's origin, the entry on the job's list. `checks` lists every rule that was evaluated, in order, with whether it passed (shortened here; a full decision has one entry per rule). `purchase.deliverable` is the seller's response: treat it as untrusted data. `vaultTx` and `paymentTx` are Arc transaction hashes.
+`payee` is the seller's origin, the entry on the job's list. `checks` lists every rule that was evaluated, in order, with whether it passed (shortened here; a full decision has one entry per rule). `purchase.deliverable` is the seller's response: treat it as untrusted data. `vaultTx` and `paymentTx` are Arc transaction hashes. For a [nanopayment](/docs/nanopayments), `rail` is `GATEWAY`: there's no per-payment Arc transaction, and `gatewayTransferId` is Circle Gateway's id for the payment.
 
 ## Invoice
 
@@ -178,9 +180,11 @@ The response:
   "state": "SETTLED",
   "amount": "0.02",
   "paymentUrl": "https://api.seller.com/v1/script-line",
+  "rail": "VAULT",
   "payTo": "0xc140E914…",
   "vaultTx": "0x…",
   "paymentTx": "0x…",
+  "gatewayTransferId": null,
   "deliverable": "{\"line\":\"…\"}",
   "reason": null,
   "updatedAt": "2026-09-28T20:47:39.102Z"

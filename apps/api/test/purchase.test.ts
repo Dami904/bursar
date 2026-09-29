@@ -28,6 +28,9 @@ const fakeWallets: WalletProvider = {
   transfer() {
     throw new Error("not used in API tests");
   },
+  execute() {
+    throw new Error("not used in API tests");
+  },
   transferStatus() {
     throw new Error("not used in API tests");
   },

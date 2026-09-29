@@ -4,6 +4,7 @@ import {
   alerts,
   authorizations,
   chainCursors,
+  committedOf,
   decisions,
   jobs,
   telegramLinks,
@@ -117,11 +118,11 @@ export async function produceAlerts(deps: AlertDeps): Promise<number> {
     .where(
       and(
         eq(jobs.status, "ACTIVE"),
-        sql`${jobs.budget} > 0 and (${jobs.settled} + ${jobs.reserved} + ${jobs.pending} + ${jobs.unresolved}) * 5 >= ${jobs.budget} * 4`,
+        sql`${jobs.budget} > 0 and (${jobs.settled} + ${jobs.reserved} + ${jobs.pending} + ${jobs.unresolved} + greatest(${jobs.gatewayFunded} - ${jobs.gatewayDrawn}, 0)) * 5 >= ${jobs.budget} * 4`,
       ),
     );
   for (const job of nearlySpent) {
-    const left = job.budget - job.settled - job.reserved - job.pending - job.unresolved;
+    const left = job.budget - committedOf(job);
     list.push({
       ownerId: job.ownerId,
       jobId: job.id,

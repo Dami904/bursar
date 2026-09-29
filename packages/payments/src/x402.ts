@@ -9,8 +9,10 @@ import type {
   PaymentRequirements,
   SettleResponse,
 } from "@x402/core/types";
+import { BatchEvmScheme } from "@circle-fin/x402-batching/client";
 import { ExactEvmScheme } from "@x402/evm/exact/client";
 import type { Hex } from "viem";
+import { GATEWAY_NETWORKS, isGatewayRequirement } from "./gateway.js";
 import { assertFetchable } from "./ssrf.js";
 
 const requestTimeoutMs = 15_000;
@@ -28,6 +30,8 @@ export interface Quote {
   readonly requirements: PaymentRequirements;
   readonly amount: bigint;
   readonly payTo: string;
+  /** VAULT: an ordinary on-chain x402 payment. GATEWAY: Circle's batched (Nanopayments) scheme. */
+  readonly rail: "VAULT" | "GATEWAY";
 }
 
 export interface QuoteOptions {
@@ -70,12 +74,18 @@ export async function quote(url: string, options: QuoteOptions): Promise<Quote> 
   } catch {
     throw new QuoteError("The PAYMENT-REQUIRED header isn't valid x402");
   }
-  const requirements = paymentRequired.accepts.find(
+  const usable = paymentRequired.accepts.filter(
     (option) =>
       option.scheme === "exact" &&
       option.network === options.network &&
-      option.asset.toLowerCase() === options.asset.toLowerCase(),
+      option.asset.toLowerCase() === options.asset.toLowerCase() &&
+      (!isGatewayRequirement(option) || GATEWAY_NETWORKS[option.network] !== undefined),
   );
+  // A plain on-chain payment when the seller offers one (the vault checks each payment itself);
+  // Circle's batched scheme when that's all it takes, which is how sub-cent sellers price.
+  const requirements =
+    usable.find((option) => !isGatewayRequirement(option)) ??
+    usable.find((option) => isGatewayRequirement(option));
   if (requirements === undefined) {
     throw new QuoteError(`The seller doesn't accept USDC on ${options.network}`);
   }
@@ -88,6 +98,7 @@ export async function quote(url: string, options: QuoteOptions): Promise<Quote> 
     requirements,
     amount: BigInt(requirements.amount),
     payTo: requirements.payTo,
+    rail: isGatewayRequirement(requirements) ? "GATEWAY" : "VAULT",
   };
 }
 
@@ -180,10 +191,23 @@ export async function signPayment(
   paymentRequired: PaymentRequired,
   requirements: PaymentRequirements,
 ): Promise<SignedPayment> {
-  const result = await new ExactEvmScheme(signer).createPaymentPayload(
-    paymentRequired.x402Version,
-    requirements,
-  );
+  // Same payload shape either way (an EIP-3009 authorization and its signature); the batched
+  // scheme signs against Circle's GatewayWallet instead of USDC itself.
+  const result = (
+    isGatewayRequirement(requirements)
+      ? await new BatchEvmScheme(signer).createPaymentPayload(
+          paymentRequired.x402Version,
+          requirements,
+        )
+      : await new ExactEvmScheme(signer).createPaymentPayload(
+          paymentRequired.x402Version,
+          requirements,
+        )
+  ) as {
+    x402Version: number;
+    payload: Record<string, unknown>;
+    extensions?: Record<string, unknown>;
+  };
   const payload: PaymentPayload = {
     x402Version: result.x402Version,
     ...(paymentRequired.resource === undefined ? {} : { resource: paymentRequired.resource }),

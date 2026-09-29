@@ -3,12 +3,19 @@ import {
   annotate,
   approvals,
   authorizations,
+  gatewayFloats,
   jobs,
   LedgerError,
   transition,
   type Db,
 } from "@bursar/db";
-import { jobVaultAbi, stableUuid, usdcAbi, type WalletProvider } from "@bursar/payments";
+import {
+  findGatewayTransfer,
+  jobVaultAbi,
+  stableUuid,
+  usdcAbi,
+  type WalletProvider,
+} from "@bursar/payments";
 import { and, eq, inArray, isNotNull, lt } from "drizzle-orm";
 import type { Account, Chain, Hex, PublicClient, Transport, WalletClient } from "viem";
 import { revertReason } from "./executor.js";
@@ -21,6 +28,8 @@ export interface ReconcilerDeps {
   readonly vault: Hex;
   readonly usdc: Hex;
   readonly wallets: WalletProvider;
+  /** CAIP-2 network, e.g. "eip155:5042002": where Gateway payments are looked up. */
+  readonly network: string;
   /** How long a payment can wait for a human before it's rejected. */
   readonly approvalTtlMs?: number;
   /** Extra native balance a job wallet needs to pay gas when sending money back (Arc: USDC). */
@@ -35,6 +44,8 @@ const DEFAULT_APPROVAL_TTL_MS = 2 * 60 * 60 * 1000;
 /** 0.01 USDC in Arc's 18-decimal native units: far above an ERC-20 transfer's fee. */
 const DEFAULT_GAS_BUFFER = 10n ** 16n;
 const DEFAULT_EXPIRY_GRACE_MS = 15_000;
+/** A Gateway payment Gateway still hasn't seen after this long goes back to the float. */
+const GATEWAY_UNKNOWN_MS = 10 * 60_000;
 const STUCK_RELEASE_MS = 2 * 60 * 1000;
 const DEFAULT_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 /** Leftovers below 0.01 USDC aren't worth a transaction: the fee would eat most of them. */
@@ -76,7 +87,8 @@ export async function reconcileOnce(deps: ReconcilerDeps): Promise<void> {
   for (const auth of open) {
     const logger = log.with({ authorizationId: auth.id, jobId: auth.jobId, step: "reconcile" });
     try {
-      await resolve(deps, auth, logger);
+      if (auth.rail === "GATEWAY") await resolveGateway(deps, auth, logger);
+      else await resolve(deps, auth, logger);
     } catch (error) {
       if (error instanceof LedgerError && error.code === "STATE_CHANGED") continue;
       logger.error("reconcile step failed; will retry", error);
@@ -200,14 +212,58 @@ async function resolve(deps: ReconcilerDeps, auth: AuthorizationRow, logger: Log
   }
 }
 
+/**
+ * A Gateway payment whose outcome we didn't hear. Circle Gateway is the source of truth: if it
+ * received the signed payment, it's paid. If Gateway still has no record after a while, it goes
+ * back to the job's float. Gateway signatures stay valid for days, but the float was counted
+ * against the budget in full when it left the vault, so even a late submission can't spend past
+ * the budget: holding the money for days would protect nothing.
+ */
+async function resolveGateway(deps: ReconcilerDeps, auth: AuthorizationRow, logger: Logger) {
+  if (auth.payer === null || auth.paymentNonce === null) return;
+  const transfer = await findGatewayTransfer(deps.network, auth.payer, auth.paymentNonce);
+  if (transfer !== null) {
+    await transition(
+      deps.db,
+      auth.id,
+      "SETTLED",
+      {
+        gatewayTransferId: transfer.id,
+        resolvedReason: "Reconciled: Circle Gateway received the signed payment",
+      },
+      { expectFrom: "UNRESOLVED" },
+    );
+    logger.info("unresolved Gateway payment turned out received", { transferId: transfer.id });
+    return;
+  }
+  if (Date.now() - auth.updatedAt.getTime() < GATEWAY_UNKNOWN_MS) return;
+  await transition(
+    deps.db,
+    auth.id,
+    "RELEASED",
+    {
+      resolvedReason:
+        "Circle Gateway never received the payment; the money stays in the job's Gateway balance",
+    },
+    { expectFrom: "UNRESOLVED" },
+  );
+  logger.info("expired Gateway payment released back to the float");
+}
+
 /** On Arc, gas is paid in USDC from the same balance, so a wallet holding exactly `amount` needs a top-up. */
-async function ensureGas(deps: ReconcilerDeps, wallet: Hex, amount: bigint, logger: Logger) {
+export async function ensureGas(
+  deps: Pick<ReconcilerDeps, "client" | "operator" | "gasBufferNative">,
+  wallet: Hex,
+  amount: bigint,
+  logger: Logger,
+): Promise<string | null> {
   const buffer = deps.gasBufferNative ?? DEFAULT_GAS_BUFFER;
   const balance = await deps.client.getBalance({ address: wallet });
-  if (balance >= usdcToNative(amount) + buffer) return;
+  if (balance >= usdcToNative(amount) + buffer) return null;
   const hash = await deps.operator.sendTransaction({ to: wallet, value: buffer });
   await deps.client.waitForTransactionReceipt({ hash, timeout: 30_000 });
-  logger.info("topped up job wallet gas for the refund", { tx: hash });
+  logger.info("topped up job wallet gas", { tx: hash });
+  return hash;
 }
 
 /** Approvals nobody acted on in time are rejected, which frees their held money. */
@@ -316,6 +372,18 @@ async function sweepWallets(deps: ReconcilerDeps) {
         .where(and(eq(authorizations.jobId, job.id), inArray(authorizations.state, IN_FLIGHT)))
         .limit(1);
       if (busy.length > 0) continue;
+      // A Gateway float between its vault release and its deposit sits in this wallet too.
+      const floating = await deps.db
+        .select({ id: gatewayFloats.id })
+        .from(gatewayFloats)
+        .where(
+          and(
+            eq(gatewayFloats.jobId, job.id),
+            inArray(gatewayFloats.state, ["RELEASING", "FUNDED", "DEPOSITING"]),
+          ),
+        )
+        .limit(1);
+      if (floating.length > 0) continue;
       const address = job.agentWalletAddress as Hex;
       const balance = await deps.client.readContract({
         address: deps.usdc,

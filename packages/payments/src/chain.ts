@@ -13,6 +13,11 @@ export function vaultOpIdFor(authorizationId: string): Hex {
   return keccak256(stringToBytes(`bursar:op:${authorizationId}`));
 }
 
+/** The operation id for a Gateway float's vault release: its own namespace, never a payment's. */
+export function vaultFloatOpIdFor(floatId: string): Hex {
+  return keccak256(stringToBytes(`bursar:float:${floatId}`));
+}
+
 export const jobVaultAbi = parseAbi([
   "function isPayee(bytes32 jobId, address payee) view returns (bool)",
   "function isApprover(bytes32 jobId, address approver) view returns (bool)",

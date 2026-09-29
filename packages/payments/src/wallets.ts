@@ -18,6 +18,15 @@ export interface TransferRequest {
   readonly idempotencyKey: string;
 }
 
+export interface ExecuteRequest {
+  readonly wallet: JobWallet;
+  readonly contract: Hex;
+  /** ABI-encoded call. */
+  readonly data: Hex;
+  /** Same key, same call: a retry never runs it twice. */
+  readonly idempotencyKey: string;
+}
+
 export type TransferState = "PENDING" | "COMPLETE" | "FAILED";
 
 /** Creates per-job wallets, signs with them and moves money out of them. Circle in production. */
@@ -26,6 +35,8 @@ export interface WalletProvider {
   signer(wallet: JobWallet): TypedDataSigner;
   /** Starts a token transfer. Asynchronous: poll transferStatus for the outcome. */
   transfer(request: TransferRequest): Promise<{ readonly id: string }>;
+  /** Calls a contract from the wallet (e.g. a Gateway deposit). Poll transferStatus with the id. */
+  execute(request: ExecuteRequest): Promise<{ readonly id: string }>;
   transferStatus(
     id: string,
   ): Promise<{ readonly state: TransferState; readonly txHash: string | null }>;
@@ -80,6 +91,19 @@ export class CircleWalletProvider implements WalletProvider {
       tokenAddress: request.token,
       amount: [formatUsdc(request.amount, { minDecimals: 0 })],
       destinationAddress: request.to,
+      fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+      idempotencyKey: request.idempotencyKey,
+    });
+    const id = response.data?.id;
+    if (id === undefined) throw new Error("Circle returned no transaction id");
+    return { id };
+  }
+
+  async execute(request: ExecuteRequest): Promise<{ readonly id: string }> {
+    const response = await this.client.createContractExecutionTransaction({
+      walletId: request.wallet.id,
+      contractAddress: request.contract,
+      callData: request.data,
       fee: { type: "level", config: { feeLevel: "MEDIUM" } },
       idempotencyKey: request.idempotencyKey,
     });
