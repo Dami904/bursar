@@ -9,10 +9,13 @@ Solidity contracts for Bursar, built and tested with Foundry (see `PLAN.md` §8.
 
 ## Deployed on Arc testnet (chain 5042002)
 
-| Contract      | Address                                                                                                                            | Source   |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| `JobVault`    | [`0x5Cd51a31fE931D31574Eadd083A0B5c210CA2cB6`](https://explorer.testnet.arc.io/address/0x5cd51a31fe931d31574eadd083a0b5c210ca2cb6) | Verified |
-| `AuditAnchor` | [`0x8f919903261AB618537DC0a114E6B46C99Db8727`](https://explorer.testnet.arc.io/address/0x8f919903261ab618537dc0a114e6b46c99db8727) | Verified |
+| Contract                    | Address                                                                                                                            | Source   |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| `JobVault`                  | [`0x5Cd51a31fE931D31574Eadd083A0B5c210CA2cB6`](https://explorer.testnet.arc.io/address/0x5cd51a31fe931d31574eadd083a0b5c210ca2cb6) | Verified |
+| `AuditAnchor`               | [`0xCe76d1DAcbECd7dc4f6D881D673b981EdEE58ac4`](https://explorer.testnet.arc.io/address/0xce76d1dacbecd7dc4f6d881d673b981edee58ac4) | Verified |
+| `AuditAnchor` (development) | [`0x8f919903261AB618537DC0a114E6B46C99Db8727`](https://explorer.testnet.arc.io/address/0x8f919903261ab618537dc0a114e6b46c99db8727) | Verified |
+
+The production AuditAnchor was deployed on its own (`forge create`) when the live service moved to a fresh database: an anchor's decision count can never go down, so a new log needs a new anchor. The development one keeps the anchors made while building.
 
 Operator: `0xC2D41C50Ef647B0Ae52aA3afEa5dD876d27E6deE`. USDC: `0x3600000000000000000000000000000000000000` (ERC-20 interface, 6 decimals). Machine-readable: [`deployments/5042002.json`](deployments/5042002.json).
 

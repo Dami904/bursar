@@ -14,7 +14,7 @@ Bursar's money and its audit trail live in two small contracts on Arc testnet. B
 | Contract | Address |
 |---|---|
 | **JobVault**: holds every job's USDC and enforces its rules | [`0x5Cd51a31fE931D31574Eadd083A0B5c210CA2cB6`](https://explorer.testnet.arc.io/address/0x5Cd51a31fE931D31574Eadd083A0B5c210CA2cB6) |
-| **AuditAnchor**: records the head of Bursar's decision log | [`0x8f919903261AB618537DC0a114E6B46C99Db8727`](https://explorer.testnet.arc.io/address/0x8f919903261AB618537DC0a114E6B46C99Db8727) |
+| **AuditAnchor**: records the head of Bursar's decision log | [`0xCe76d1DAcbECd7dc4f6D881D673b981EdEE58ac4`](https://explorer.testnet.arc.io/address/0xCe76d1DAcbECd7dc4f6D881D673b981EdEE58ac4) |
 | **USDC** (ERC-20 interface, 6 decimals) | [`0x3600000000000000000000000000000000000000`](https://explorer.testnet.arc.io/address/0x3600000000000000000000000000000000000000) |
 | **Bursar operator**: the only address allowed to call `release`, `refund` and `anchor` | [`0xC2D41C50Ef647B0Ae52aA3afEa5dD876d27E6deE`](https://explorer.testnet.arc.io/address/0xC2D41C50Ef647B0Ae52aA3afEa5dD876d27E6deE) |
 
@@ -67,5 +67,7 @@ function anchors(uint64 seq) external view returns (bytes32 head, uint64 decisio
 function latestSeq() external view returns (uint64);
 event Anchored(uint64 indexed seq, bytes32 head, uint64 decisions, uint64 timestamp);
 ```
+
+An earlier AuditAnchor, [`0x8f91…8727`](https://explorer.testnet.arc.io/address/0x8f919903261AB618537DC0a114E6B46C99Db8727), holds the anchors made while Bursar was being built. The live service anchors to the address above.
 
 Anchors must be posted in order (`seq` is exactly the last one plus one) and the count of decisions covered can never go down. So anchors can't be skipped, replaced or replayed. It holds no money.
