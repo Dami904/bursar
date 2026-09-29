@@ -1,0 +1,60 @@
+Small payments shouldn't need you; big ones should. The job's **approval threshold** ("Ask me above" in the console) draws that line. This guide explains what happens to a payment above it, how approving works, and why an approval can't be faked.
+
+## What waits for approval
+
+A payment waits for a person when **every** rule passes (payee, caps, limits, budget, window) and the amount is **strictly above** the threshold. A payment that breaks a rule is refused outright; it never reaches your approvals. So an approval is always a yes-or-no on a payment that is otherwise fine.
+
+While it waits, the amount is held against the budget (shown as "Needs you" on the budget bar), so other agents can't spend the same money in the meantime. The agent gets back `NEEDS_APPROVAL` and a payment id, and checks later with `check_payment` (MCP) or `GET /spend/authorizations/:id` (HTTP).
+
+## Approving
+
+Open **Approvals** in the console, or tap the link in the Telegram alert or webhook. Each waiting payment shows the amount, who it's for, which job, how long it's been waiting, and the agent's reasoning: its case for why this payment is worth it.
+
+- **Approve**: your wallet signs an approval message (details below), and within seconds Bursar releases the payment from the vault. The agent's next check sees it paid.
+- **Reject**: the held amount goes back to the budget, and the agent sees `REJECTED`. You can add a short note: it is kept with the decision, and the agent sees it too ("Rejected: …"), so it can adjust its plan.
+
+The Approvals page is designed for a phone, so you can approve from wherever the alert reaches you.
+
+<Callout>
+
+Nobody answered? A payment waiting longer than **two hours** is rejected automatically and its money returns to the budget. An agent never waits forever, and forgotten approvals don't tie up the budget.
+
+</Callout>
+
+## Why an approval can't be faked
+
+Approving isn't a button that tells our server "yes". It's a signature from your wallet over the exact payment, and the **vault on Arc** checks that signature itself before releasing anything above the threshold. Our server can't approve on your behalf, because it doesn't have your key.
+
+The message is standard EIP-712 typed data, so your wallet shows every field before you sign:
+
+```text
+Domain:  name "Bursar JobVault", version "1", chainId 5042002, verifyingContract <JobVault>
+Approval:
+  jobId          bytes32   the job, as the vault knows it
+  opId           bytes32   this one payment
+  to             address   who receives the money (the job's payment wallet, or the vendor)
+  amount         uint128   the exact amount, in USDC base units (6 decimals)
+  policyVersion  uint64    the job's rules version when you signed
+  deadline       uint64    when the approval stops being valid (Unix seconds)
+```
+
+That binds your signature tightly:
+
+- **One payment only.** It names one operation id, one recipient and one amount. It can't be reused for a different or larger payment, and a spent operation id can never release again.
+- **Only under the rules you saw.** If the job's rules change after you sign (a new cap or budget, a payee removed), the version no longer matches and the vault refuses the release (`StalePolicy`).
+- **Only for a while.** The console asks for approvals valid for one hour; the API accepts up to 24 hours. After the deadline the vault refuses it.
+- **Only this vault, only this chain.** The domain pins the contract address and chain id.
+
+Bursar's API also verifies your signature before passing it on, so a wrong or expired signature fails immediately with a clear error instead of a failed transaction.
+
+## Who can approve
+
+When you sign in to the console, your own wallet becomes an approver for your jobs, and the wizard registers it as the job's approver in the vault ("Let your wallet approve payments").
+
+You can add other approvers, such as a finance lead or a co-founder. It takes two steps today: `POST /approvers` with their name and wallet address (they then sign in with that wallet and see only Approvals), and allowing their wallet in the vault with `setApprover` from your wallet. The console doesn't do the second step for other people's wallets yet.
+
+<Callout type="warn">
+
+Approvals are verified for regular wallets (EOAs) today. The vault itself also accepts smart-contract wallets (ERC-1271), but Bursar's API would reject their signatures. Use a regular wallet as an approver for now.
+
+</Callout>

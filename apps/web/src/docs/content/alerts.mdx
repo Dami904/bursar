@@ -1,0 +1,53 @@
+Agents work while you're away. Alerts bring the moments that need a person, like a payment to approve or a job that looks wrong, to wherever you are: a Telegram chat, your own server, or both.
+
+## What you're alerted about
+
+| Alert | When it fires | Type |
+|---|---|---|
+| **A payment needs your approval** | A payment is above the job's threshold and waiting for you. One alert per payment. | `needs_approval` |
+| **A payment is stuck** | A payment has been in flight for more than 5 minutes without settling or being refunded. Bursar keeps checking the chain meanwhile. | `stuck_payment` |
+| **Budget 80% used** | Settled, held, waiting and stuck payments together reach 80% of the job's budget. Once per job. | `budget_80` |
+| **A job was frozen** | The vault paid out money Bursar can't match to any of the job's payments. The job is frozen at once and paused on-chain. See [Security model](/docs/security). | `job_frozen` |
+| **Many requests blocked** | 3 or more payments refused on one job within 10 minutes: often an agent that's confused, or being pushed by something it read. | `denial_burst` |
+
+Every alert has a title, a short description and a link straight to the right place in the console: the Approvals page, or the job.
+
+## Telegram
+
+1. In the console, open **Alerts** (the bell) and choose **Connect Telegram**.
+2. Telegram opens a chat with the Bursar bot, with a one-time link code already filled in. Press **Start**.
+3. The bot confirms, and the chat appears under Alerts as "Telegram · Chat linked".
+
+The link code works once and expires after an hour. One Telegram chat is linked per Bursar account; to move alerts to a different chat, remove the linked one first, then connect again.
+
+Messages look like this:
+
+```text
+0.15 USDC needs your approval
+Short film: Money for machines: "The closing scene needs the market report…"
+https://<console>/app/approvals
+```
+
+## Webhooks
+
+Webhooks send each alert to your own server as a signed JSON `POST`, so you can page someone, post to Slack, open a ticket, or have another agent react.
+
+1. Under **Alerts**, enter your endpoint's URL and choose **Add webhook**.
+2. Bursar shows a **signing secret** once. Store it on your server.
+3. Choose **Send a test alert** to check everything is wired up.
+
+Your endpoint must be a public `https` (or `http`) address. Bursar refuses private and local addresses, doesn't follow redirects, and waits at most 5 seconds for an answer. Answer with any `2xx` status to confirm delivery. The payload, headers and signature check are in the [Webhooks reference](/docs/webhooks).
+
+## Delivery and retries
+
+Alerts go through an outbox, so a restart or a network blip doesn't lose them:
+
+- Each event is queued **once**. Bursar won't send the same approval request twice.
+- If a target fails, the alert is retried after 1 minute, then 2, 4, 8 and so on (never more than an hour apart), up to **8 attempts**.
+- An alert counts as delivered only when every target accepted it.
+
+<Callout>
+
+An alert queued while you had no targets set up isn't sent later when you add one. Set up alerts before handing an agent real work, and use **Send a test alert** to be sure.
+
+</Callout>

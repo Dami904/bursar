@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { alertTargets, alerts, telegramLinks, type Db } from "@bursar/db";
 import { and, desc, eq } from "drizzle-orm";
-import { badRequest, notFound } from "../http/errors.js";
+import { badRequest, conflict, notFound } from "../http/errors.js";
 
 /** An owner's alert targets. Webhook secrets are never shown again after creation. */
 export async function listTargets(db: Db, ownerId: string) {
@@ -49,8 +49,21 @@ export async function removeTarget(db: Db, ownerId: string, id: string) {
   if (row === undefined) throw notFound("Alert target");
 }
 
-/** A one-time link that connects a Telegram chat to this owner when opened. */
+/**
+ * A one-time link that connects a Telegram chat to this owner when opened. One chat per account:
+ * remove the linked one first to move alerts elsewhere.
+ */
 export async function telegramLink(db: Db, ownerId: string, botUsername: string) {
+  const [linked] = await db
+    .select({ id: alertTargets.id })
+    .from(alertTargets)
+    .where(and(eq(alertTargets.ownerId, ownerId), eq(alertTargets.kind, "TELEGRAM")));
+  if (linked !== undefined) {
+    throw conflict(
+      "TELEGRAM_LINKED",
+      "Telegram is already connected; remove it to connect another chat",
+    );
+  }
   const code = randomBytes(12).toString("base64url");
   await db.insert(telegramLinks).values({ code, ownerId });
   return { url: `https://t.me/${botUsername}?start=${code}` };

@@ -228,3 +228,34 @@ describe("operator brief", () => {
     ).toBe(404);
   });
 });
+
+describe("public demo", () => {
+  it("shows the demo job to anyone, and nothing else", async () => {
+    const demo = await seedJob();
+    const other = await seedJob();
+    const { decision } = await requestSpend(
+      db,
+      demo.agents[0]!.principal,
+      spend("0.02", "op-demo-0001"),
+    );
+    const { decision: private_ } = await requestSpend(
+      db,
+      other.agents[0]!.principal,
+      spend("0.02", "op-demo-0002"),
+    );
+    const app = createApp(db, { demoJobId: demo.job.id });
+    const get = async (path: string) => {
+      const response = await app.request(path);
+      return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+    };
+
+    const page = await get("/demo");
+    expect(page.status).toBe(200);
+    expect(page.body).toMatchObject({ job: { id: demo.job.id }, decisions: [{ id: decision.id }] });
+    expect((await get(`/demo/decisions/${decision.id}`)).status).toBe(200);
+    // Another job's decision is not public, even by id.
+    expect((await get(`/demo/decisions/${private_.id}`)).status).toBe(404);
+    // Without a demo job configured, there's nothing public.
+    expect((await createApp(db).request("/demo")).status).toBe(404);
+  });
+});

@@ -1,0 +1,60 @@
+Bursar exists to limit damage. That includes damage from a confused agent, a malicious seller, a leaked key, and Bursar's own server. This page states plainly who is trusted with what, what each failure could cost, and what caps it. The developer version is [THREAT_MODEL.md](https://github.com/Dami904/bursar/blob/main/docs/THREAT_MODEL.md) in the repository.
+
+## Who holds what
+
+| Party | Holds | Can |
+|---|---|---|
+| **Owner** (you) | Your wallet | Set budgets, caps, payees and approvers; pause and resume; close and withdraw. The root of trust. |
+| **Approver** | Their wallet | Sign approvals for payments above the threshold. Nothing else. |
+| **Agent** | One agent key | Ask to spend for its own job, within its rules. Nothing else. |
+| **Bursar's server** | The operator key and access to the job payment wallets | Run the rules and call `release` within the vault's limits. It can't change any rule or resume a paused job. |
+
+## If something is compromised
+
+| Compromised | Worst case | What caps it |
+|---|---|---|
+| **An agent key** | Spends up to the job's remaining budget (and its own and its parents' limits), only to allowed payees, only within the per-payment cap and spending window. | Bursar's rules and the vault. Revoke or replace the agent and the key dies instantly. |
+| **An agent's judgement** (prompt injection, a bad brief) | Makes poor choices within its rules: overpays an allowed seller, buys something useless. | The same limits. Every choice is recorded with its reasoning, and bursts of refusals raise an alert. |
+| **A seller** | Takes payment and delivers nothing, or sends text trying to manipulate the agent. | Bursar limits who can be paid, not whether they deliver. Seller content is always labelled untrusted. |
+| **Your console session** (browser) | For up to 24 hours: acts as you in Bursar, e.g. adds payees or agent keys. | It can't sign anything on-chain: the vault's rules, approvals and withdrawals still need your wallet. Signing out revokes it. |
+| **Bursar's server, including the operator key** | Per job: releases up to the remaining budget, only to payees *you* allowed in the vault or the job's payment wallet, within the per-payment cap and window rate, until you pause. | The vault's rules, which only your wallet can change. You can pause at once. Payouts Bursar didn't make freeze the job automatically. |
+| **Circle wallet access** | Spends what's in the job payment wallets: only payments in flight. | Each wallet is funded one payment at a time. |
+| **Your wallet** | Everything for your jobs. | Nothing. Keep it safe; it's the root of trust. |
+
+## What the vault enforces, whatever Bursar says
+
+- **Default deny.** A payee or approver that was never allowed is refused.
+- **Nothing is taken on trust.** The vault recomputes every check itself on every release.
+- **Only the owner changes rules.** The operator can release within them and pause in an emergency, never resume.
+- **Rule changes void old decisions.** Every change bumps the job's `policyVersion`. A release decided under older rules fails (`StalePolicy`), and approvals are signed over the version.
+- **Approvals are bound tightly**: to this contract and chain, to one operation, recipient and amount, with a deadline checked by chain time.
+- **One release per operation, ever**, even after a refund.
+- **The books always balance.** The vault's USDC always covers what it owes (a fuzz-tested invariant), and refunds only credit USDC that actually arrived.
+
+## What Bursar watches for
+
+- **Unexplained payouts.** Every `Released` event on Arc must match one of the job's payments. One that doesn't, which is what a leaked operator key used outside Bursar would look like, freezes the job in Bursar at once and pauses it on-chain. The loss is limited to what was released before the indexer saw it: seconds on Arc.
+- **Bursts of refusals**: 3 or more on one job in 10 minutes raise an alert. It's often the first sign of an agent being pushed.
+- **Stuck payments** raise an alert after 5 minutes.
+
+## Keys and sessions
+
+- Keys (`bsr_agt_`, `bsr_own_`, `bsr_apr_`) are stored only as SHA-256 hashes. A database leak doesn't leak usable keys.
+- Agent keys are scoped to one job and can't change rules, approve, or read other jobs.
+- Console sign-in is Sign-In with Ethereum: one-time nonces (10 minutes), checked against Bursar's domain and chain, ordinary wallets only. Sessions last 24 hours and are revoked on sign-out.
+- The session key is only ever sent in an `Authorization` header, never a cookie, so other sites can't make requests as you.
+- Each run of Bursar's own AI operator gets a fresh key that's revoked when the run ends.
+
+## Outgoing requests
+
+Bursar fetches only two kinds of URL: sellers on a job's allow-list, and the owner's webhook. Both go through the same guard: public addresses only, no redirects, short timeouts. An agent can't make Bursar fetch an arbitrary URL.
+
+## Not defended, stated plainly
+
+- A compromised server can drain each job's remaining budget to its **allowed** payees, at the spending-window rate, until you pause. Tight caps and short windows limit this.
+- A dishonest allowed payee is paid if the agent chooses it.
+- A poor decision within the rules is recorded and explainable, not prevented.
+- Denial of service against the API or Arc's RPC stops new payments; it doesn't move money.
+- The operator address is fixed in the deployed contracts. If its key leaked, jobs would be paused and closed (returning funds to owners) and a new vault deployed.
+
+More on this in [Known limits](/docs/limitations).

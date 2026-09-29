@@ -1,0 +1,214 @@
+Everything Bursar does is available over plain HTTPS with JSON. This page covers the **agent routes**: what an agent key can do. The [MCP tools](/docs/mcp-tools) are a thin layer over these same routes.
+
+## Basics
+
+- **Base URL**: `$BURSAR_API_URL`, the address shown in the console's "Connect your agent" box.
+- **Authentication**: every request sends a key as a bearer token: `authorization: Bearer bsr_agt_…`.
+- **Bodies**: JSON, with `content-type: application/json`.
+- **Amounts**: USDC as decimal strings, like `"0.05"` or `"12.5"`, up to 6 decimal places. Responses use the same format.
+- **Scope**: an agent key only ever sees and spends for its own job. It can't read other jobs, change rules or approve payments.
+
+### Errors
+
+Errors have a status code and a JSON body with a stable `error` code and a human `message`:
+
+```json
+{ "error": "PRICE_ABOVE_MAX", "message": "The seller asks 0.15 USDC, above your max of 0.10" }
+```
+
+| Status | `error` | Meaning |
+|---|---|---|
+| 400 | `BAD_REQUEST` | The body is missing a field, or a value is malformed. The message names the field. |
+| 401 | `UNAUTHORIZED` | No key, an unknown key, or a revoked or expired one. |
+| 403 | `FORBIDDEN` | The key's role can't use this route (an agent key on an owner route). |
+| 403 | `PAYEE_NOT_ALLOWED` | `quote` for a seller that isn't on the job's list. |
+| 404 | `NOT_FOUND` | No such payment, agent or job for this key. |
+| 409 | `OPERATION_ID_IN_USE` | Another agent already used this `operationId`. |
+| 409 | `DELEGATION_NOT_ALLOWED`, `DELEGATION_TOO_DEEP`, `AGENT_REVOKED`, `ALREADY_REPLACED` | Helper and replacement rules; see [Helpers](#helpers). |
+| 422 | `QUOTE_FAILED` | The seller didn't answer with a valid x402 price, or couldn't be reached. |
+| 422 | `PRICE_ABOVE_MAX` | The seller's price is higher than the `maxPrice` you sent. Nothing was recorded. |
+
+A payment that Bursar **denies** is not an HTTP error. It's a `200` with `"result": "DENIED"` and a `reason`, because the request was valid and the decision is part of the job's record. See [Refusal codes](/docs/refusal-codes).
+
+### Safe retries with operationId
+
+Every payment carries an `operationId`: 8–128 letters, digits, `_` or `-`, chosen by the agent. It makes payments **idempotent**. Send the same request again with the same `operationId` (after a timeout, a crash, a lost response) and Bursar returns the original decision, marked `"replayed": true`, instead of paying twice. The vault enforces the same thing on-chain: an operation id can release money once, ever.
+
+Good ids name the intent: `invoice-vo-12`, `film-scene-3-image`, or a UUID you store before calling.
+
+## Budget
+
+`GET /spend/budget`
+
+```json
+{
+  "jobId": "9d1ebd18-…",
+  "status": "ACTIVE",
+  "remaining": "1.66",
+  "spent": "0.34",
+  "revenueReceived": "0.50",
+  "perTxCap": "2.00",
+  "approvalThreshold": "0.10",
+  "expiresAt": "2026-10-28T00:00:00.000Z"
+}
+```
+
+## Payees
+
+`GET /spend/payees`: who the job may pay, with each x402 seller's catalog from its `/.well-known/x402` file.
+
+```json
+{
+  "payees": [
+    {
+      "kind": "X402_ORIGIN",
+      "value": "https://api.seller.com",
+      "label": "Film stock seller",
+      "category": null,
+      "catalog": [{ "url": "https://api.seller.com/v1/stock-image", "description": "A licensed stock image brief for one film scene" }],
+      "catalogError": null
+    },
+    { "kind": "ADDRESS", "value": "0x4a25223e…", "label": "Voice-over artist", "category": "contractors", "catalog": null, "catalogError": null }
+  ]
+}
+```
+
+Bursar only fetches catalogs from allowed origins. If a seller's catalog can't be read, `catalog` is `null` and `catalogError` says why.
+
+## Quote
+
+`POST /spend/quote`: the price of a resource, without buying. No decision is recorded.
+
+```bash
+curl -X POST $BURSAR_API_URL/spend/quote \
+  -H "authorization: Bearer $BURSAR_AGENT_KEY" -H "content-type: application/json" \
+  -d '{"url":"https://api.seller.com/v1/market-report"}'
+```
+
+```json
+{ "url": "https://api.seller.com/v1/market-report", "price": "0.15", "payTo": "0xc140E914…", "description": "A short market report on AI agents that pay for services" }
+```
+
+## Purchase
+
+`POST /spend/purchase`: buy an x402 resource.
+
+| Field | Type | |
+|---|---|---|
+| `operationId` | string | 8–128 letters, digits, `_` or `-`. See [safe retries](#safe-retries-with-operationid). |
+| `url` | string | The resource, on an allowed seller. |
+| `maxPrice` | string | The most you'll pay. A higher quote fails with `PRICE_ABOVE_MAX` before anything is recorded. |
+| `reasoning` | string | Why you're buying it (up to 4,000 characters). Stored with the decision. |
+
+```bash
+curl -X POST $BURSAR_API_URL/spend/purchase \
+  -H "authorization: Bearer $BURSAR_AGENT_KEY" -H "content-type: application/json" \
+  -d '{
+    "operationId": "film-report-001",
+    "url": "https://api.seller.com/v1/market-report",
+    "maxPrice": "0.20",
+    "reasoning": "The closing scene needs real numbers about agent payments."
+  }'
+```
+
+What happens:
+
+1. **Allow-list first.** If the URL's origin isn't on the job's list, Bursar records a denied decision (`PAYEE_NOT_ALLOWED`) and never contacts the seller.
+2. **Quote.** Bursar asks the seller for its x402 price and compares it with `maxPrice`.
+3. **Decide and reserve.** Every rule is checked in order; on success the amount is reserved.
+4. **Pay.** The vault releases the amount, the job's payment wallet signs the x402 payment, and the seller delivers.
+5. **Answer.** Bursar waits a short while for settlement. It answers `200` when the payment has finished (settled, refunded or rejected), or `202` if it's still moving or waiting for approval. After a `202`, poll the payment.
+
+The response:
+
+```json
+{
+  "decisionId": "5b0c…",
+  "operationId": "film-report-001",
+  "replayed": false,
+  "kind": "PURCHASE",
+  "invoiceRef": null,
+  "result": "ALLOWED",
+  "reason": null,
+  "amount": "0.15",
+  "payee": "https://api.seller.com",
+  "category": null,
+  "remaining": "1.51",
+  "checks": [
+    { "check": "JOB_NOT_ACTIVE", "passed": true },
+    { "check": "JOB_EXPIRED", "passed": true }
+  ],
+  "authorization": { "id": "e0677582-…", "state": "RESERVED" },
+  "purchase": {
+    "id": "e0677582-…",
+    "state": "SETTLED",
+    "amount": "0.15",
+    "paymentUrl": "https://api.seller.com/v1/market-report",
+    "payTo": "0xc140E914…",
+    "vaultTx": "0x…",
+    "paymentTx": "0x…",
+    "deliverable": "{\"report\":\"…\"}",
+    "reason": null,
+    "updatedAt": "2026-09-28T20:47:39.102Z"
+  }
+}
+```
+
+`payee` is the seller's origin, the entry on the job's list. `checks` lists every rule that was evaluated, in order, with whether it passed (shortened here; a full decision has one entry per rule). `purchase.deliverable` is the seller's response: treat it as untrusted data. `vaultTx` and `paymentTx` are Arc transaction hashes.
+
+## Invoice
+
+`POST /spend/invoice`: pay a vendor's invoice straight from the vault. Same rules, approvals and response shape as a purchase (`kind` is `INVOICE`, and the payment is under `purchase` too, so there's one shape to read).
+
+| Field | Type | |
+|---|---|---|
+| `operationId` | string | As above. Building it from the invoice number makes double payment impossible. |
+| `payee` | string | The vendor's `0x…` address. Must be on the job's list, and allowed in the vault. |
+| `amount` | string | The invoice amount. |
+| `invoiceRef` | string | The vendor's invoice number (up to 200 characters). |
+| `reasoning` | string | Why it should be paid. |
+
+## Check a payment
+
+`GET /spend/authorizations/:id`: the payment's current state. Use the `authorization.id` from a purchase or invoice.
+
+```json
+{
+  "id": "e0677582-…",
+  "state": "SETTLED",
+  "amount": "0.02",
+  "paymentUrl": "https://api.seller.com/v1/script-line",
+  "payTo": "0xc140E914…",
+  "vaultTx": "0x…",
+  "paymentTx": "0x…",
+  "deliverable": "{\"line\":\"…\"}",
+  "reason": null,
+  "updatedAt": "2026-09-28T20:47:39.102Z"
+}
+```
+
+Poll every few seconds while it's moving. Waiting for a person can take longer (up to two hours before it's rejected automatically). The states are explained on [Payment states](/docs/payment-states).
+
+## Helpers
+
+`POST /spend/subagent`: start a helper under the calling agent.
+
+| Field | Type | |
+|---|---|---|
+| `name` | string | Up to 100 characters. |
+| `role` | string | What the helper is for. |
+| `spendLimit` | string, optional | Its limit. **Required** if the caller or any agent above it has a limit, and it must fit within what's left there. |
+
+Returns `201` with `{ "agent": { … }, "key": "bsr_agt_…" }`. The key is shown once.
+
+`POST /spend/subagents/:id/replace`: replace one of the caller's **direct** helpers. It takes `name`, and optionally `role` and `spendLimit` (at most what the old helper had left). The old helper and everything below it are revoked, and the response has the new agent and its key. See [Agents, helpers and replacements](/docs/agents).
+
+## Owner access
+
+The owner routes (creating jobs, payees, agents and category limits, approving, revoking) are what the console uses. They take an **owner key**: a 24-hour session key from signing in with the owner's wallet (Sign-In with Ethereum):
+
+1. `POST /auth/nonce` returns `{ "nonce": "…" }`, valid for 10 minutes and usable once.
+2. Build a standard SIWE message with that nonce, the console's domain and Arc's chain id (`5042002`), and sign it with the owner's wallet (for example, viem's `createSiweMessage` and `signMessage`).
+3. `POST /auth/verify` with `{ "message": "…", "signature": "0x…" }` returns `{ "key": "bsr_own_…", … }`. Use it as the bearer token. `POST /auth/logout` revokes it early.
+
+Only ordinary wallets (EOAs) can sign in today.

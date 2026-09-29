@@ -2,13 +2,20 @@
 
 What Bursar does **not** do yet, stated plainly. Updated as the build progresses.
 
-## Current (day 9)
+## Current (day 10)
+
+- **The demo job is public on purpose.** `/demo` shows one job, set by `DEMO_JOB_ID`, to anyone: its decisions, the agents' reasoning, payees and evidence. It's our own business's job. The public API serves no other job's data (tested).
+- **The demo's approvals are automatic.** A demo approver (a key the server holds, allowed only on the demo job in the vault) signs the demo job's payments after a minute, so the public feed shows approvals without a person on call. Real jobs are never approved this way.
+- **The demo's story repeats.** Its brief rotates through five scenes every few hours; the operator gets a summary of earlier runs so it doesn't buy the same thing twice in a row.
+
+## Day 9
 
 - **Automatic runs depend on the model being available.** If Gemini is overloaded when a run starts, Bursar tries the fallback model, then retries the run with backoff (2 minutes, doubling to 30, five tries). A job whose runs keep failing waits for the owner's "Run now".
 - **One automatic run at a time**, across all jobs, to stay within free-tier model limits. A busy deployment would need a queue per model key.
 - **Alerts go out once per event.** An alert queued while an owner had no targets isn't re-sent after they add one. Delivery gives up after 8 attempts.
 - **Wallet sign-in accepts ordinary wallets only** (EOAs), like approvals. Smart-contract wallets can't sign in yet.
 - **Replacing an agent from the console reuses its name**; there's no rename yet.
+- **A job can be closed only when nothing is held, waiting or stuck.** Pending approvals must be approved or rejected first, and stuck payments must resolve (refunded or settled).
 
 ## Day 8
 
@@ -30,7 +37,7 @@ What Bursar does **not** do yet, stated plainly. Updated as the build progresses
 
 - **Refunds wait for the signed payment to expire.** A refused or silent payment is refunded only after its signature expires by chain time (the seller's `maxTimeoutSeconds`, often a few minutes), because until then it could still be settled. The money stays counted against the budget meanwhile.
 - **Refund gas comes from the operator.** Arc gas is USDC from the same balance, so the operator tops up 0.01 USDC before a job wallet sends money back. The sweeper returns leftovers of at least 0.01 USDC from idle job wallets to the operator (keeping 0.005 for the transfer fee); smaller dust stays, because the fee would eat most of it.
-- **A frozen job must be resumed by hand.** When the vault pays out money Bursar can't match to a payment, the job is frozen in Bursar and paused on-chain. The owner lifts it with `POST /jobs/:id/unfreeze` and unpauses on-chain from their wallet; the console shows the freeze but has no unfreeze button yet.
+- **A frozen job must be resumed by hand.** When the vault pays out money Bursar can't match to a payment, the job is frozen in Bursar and paused on-chain. The owner checks what happened, then presses "unfreeze" in the console, which clears it in Bursar and resumes the job on-chain from their wallet.
 - **Approvals are verified server-side for regular wallets only.** The API checks the approver's EIP-712 signature with `verifyTypedData`, which covers ordinary (EOA) wallets. JobVault itself also accepts smart-contract wallets (ERC-1271), but the API would reject such an approver today.
 - Adding another approver (someone other than the owner) still takes the API plus `onchain:approver`; the console sets up only the owner's own wallet as approver. `dev:approve` remains for scripted tests.
 - The SSRF check resolves a seller's hostname before fetching, but the fetch resolves it again (a DNS-rebinding window). The allow-list is checked first, so only owner-approved origins are ever fetched.

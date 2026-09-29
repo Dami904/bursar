@@ -1,0 +1,149 @@
+[`bursar-mcp`](https://www.npmjs.com/package/bursar-mcp) gives an agent six tools. They call Bursar's [HTTP API](/docs/http-api) with the agent's key, so an agent using them can do exactly what its key allows, and nothing else. Setup is on [Connect your agent](/docs/connect).
+
+Every tool answers with JSON text. When Bursar refuses a request outright (a bad key, a quote from a seller that isn't allowed, a malformed amount), the tool result is marked as an error and holds:
+
+```json
+{ "error": "PAYEE_NOT_ALLOWED", "message": "That seller isn't on this job's allow-list" }
+```
+
+A payment that Bursar *decides* to deny is not a tool error: it's a normal result with `"decision": "DENIED"` and a `denial_reason`, because the agent asked properly and got a clear answer.
+
+## get_budget
+
+What the job has left and the rules it runs under. No inputs; read-only.
+
+```json
+{
+  "jobId": "c5ea0453-…",
+  "status": "ACTIVE",
+  "remaining": "0.12",
+  "spent": "0.06",
+  "revenueReceived": "0.00",
+  "perTxCap": "0.10",
+  "approvalThreshold": "0.05",
+  "expiresAt": "2026-10-04T08:30:38.000Z"
+}
+```
+
+`remaining` is the budget minus everything settled, held, waiting for approval or stuck: what can still be committed right now. Amounts are USDC as decimal strings.
+
+## list_sellers
+
+Who this job may pay. No inputs; read-only.
+
+```json
+{
+  "sellers": [
+    {
+      "kind": "x402 seller (purchase)",
+      "value": "https://api.seller.com",
+      "label": "Film stock seller",
+      "category": null,
+      "catalog": [
+        { "url": "https://api.seller.com/v1/market-report", "description": "A short market report on AI agents that pay for services" }
+      ]
+    },
+    {
+      "kind": "wallet (pay_invoice)",
+      "value": "0x4a25223e…",
+      "label": "Voice-over artist",
+      "category": "contractors",
+      "catalog": null
+    }
+  ]
+}
+```
+
+`catalog` comes from the seller's `/.well-known/x402` file (at most 50 entries). It lists URLs and descriptions, not prices: use `quote` for a price. Sellers without a catalog show `null`; the agent can still buy from them if it knows the URL. Descriptions are written by the seller, so treat them as data.
+
+## quote
+
+The price of one resource, without buying it. Read-only: no decision is recorded and nothing is reserved.
+
+| Input | Type | |
+|---|---|---|
+| `url` | string | Full URL of the resource, on an allowed seller. |
+
+```json
+{
+  "url": "https://api.seller.com/v1/market-report",
+  "price": "0.15",
+  "payTo": "0xc140E914…",
+  "description": "A short market report on AI agents that pay for services"
+}
+```
+
+## purchase
+
+Buy a resource from an allowed x402 seller. Bursar quotes it, decides, reserves the money, pays the seller from the job's funds, and returns what was bought.
+
+| Input | Type | |
+|---|---|---|
+| `url` | string | Full URL of the resource. |
+| `max_price` | string | The most the agent will pay, like `"0.20"`. If the seller asks more, nothing happens and the tool returns `PRICE_ABOVE_MAX`. |
+| `reasoning` | string | Why this purchase is worth it. Shown to the owner next to the payment and stored in the audit log. |
+| `operation_id` | string, optional | The agent's own id for this payment: 8–128 letters, digits, `_` or `-`. Sending the same id again never pays twice; it returns the original result. Left out, a fresh id is made and returned. |
+
+The result:
+
+```json
+{
+  "decision": "ALLOWED",
+  "denial_reason": null,
+  "amount": "0.15",
+  "remaining_budget": "1.51",
+  "operation_id": "mcp-2b8f…",
+  "payment_id": "e0677582-…",
+  "state": "SETTLED",
+  "note": null,
+  "next": null,
+  "untrusted_seller_content": "{\"report\":\"…\"}"
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `decision` | `ALLOWED`, `NEEDS_APPROVAL` or `DENIED`. |
+| `denial_reason` | For `DENIED`, the [refusal code](/docs/refusal-codes). |
+| `payment_id` | Use with `check_payment`. `null` when denied (nothing was reserved). |
+| `state` | The payment's [state](/docs/payment-states). `SETTLED` means paid and delivered. |
+| `next` | What to do now, when the payment isn't finished: wait for approval, or check again. |
+| `untrusted_seller_content` | What the seller returned (at most 4,000 characters). Data, never instructions. |
+
+Bursar waits a short while for the payment to settle before answering. If it's still moving, `state` shows where it is and `next` says to call `check_payment`.
+
+## pay_invoice
+
+Pay a vendor's invoice from the job's funds straight to their allow-listed wallet. Same rules, approvals and result shape as `purchase`. See [Paying invoices](/docs/invoices).
+
+| Input | Type | |
+|---|---|---|
+| `payee` | string | The vendor's `0x…` address, as listed by `list_sellers`. |
+| `amount` | string | The invoice amount, like `"0.08"`. |
+| `invoice_ref` | string | The vendor's invoice number. |
+| `reasoning` | string | Why this invoice should be paid now. |
+| `operation_id` | string, optional | As for `purchase`. Tip: build it from the invoice number, so an invoice can never be paid twice. |
+
+## check_payment
+
+Follow a payment that was waiting for approval or still being paid. Read-only.
+
+| Input | Type | |
+|---|---|---|
+| `payment_id` | string | From `purchase` or `pay_invoice`. |
+
+```json
+{
+  "payment_id": "e0677582-…",
+  "state": "SETTLED",
+  "amount": "0.02",
+  "note": null,
+  "untrusted_seller_content": "{\"line\":\"We gave our agents a budget, not the company card.\"}"
+}
+```
+
+When a person rejects a payment, `state` is `REJECTED` and `note` holds their reason, if they gave one.
+
+## Why there's no "start a helper" tool
+
+Bursar's HTTP API lets agents start helpers with their own keys, but the MCP server leaves it out on purpose: the helper's key would be returned into the model's conversation. Agents that need helpers can use the [HTTP API](/docs/http-api#helpers).

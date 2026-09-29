@@ -168,6 +168,11 @@ export interface ApiDeps {
   readonly siwe?: SiweConfig;
   /** How often the live stream checks for changes. */
   readonly streamPollMs?: number;
+  /**
+   * The public demo job: readable by anyone at /demo, read-only. Only this one job; every other
+   * job still needs its owner's key. It's our own business's job, so its data is ours to show.
+   */
+  readonly demoJobId?: string | undefined;
 }
 
 const PUBLIC_PATHS = new Set(["/health", "/metrics/public", "/auth/nonce", "/auth/verify"]);
@@ -229,10 +234,28 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
   });
 
   /** Traction totals across all businesses, for the landing page. No per-job detail. */
-  app.get("/metrics/public", async (c) => c.json(await computeMetrics(db, null)));
+  app.get("/metrics/public", async (c) => {
+    const [audit] = (await db.execute(sql`
+      select (select coalesce(max(seq), 0) from audit_chain)::int as entries,
+             (select count(*) from audit_anchors where status = 'CONFIRMED')::int as anchors`)) as unknown as {
+      entries: number;
+      anchors: number;
+    }[];
+    return c.json({
+      ...(await computeMetrics(db, null)),
+      audit: audit ?? { entries: 0, anchors: 0 },
+    });
+  });
 
   app.use("*", async (c, next) => {
-    if (PUBLIC_PATHS.has(c.req.path) || c.req.method === "OPTIONS") return next();
+    if (
+      PUBLIC_PATHS.has(c.req.path) ||
+      c.req.path === "/demo" ||
+      c.req.path.startsWith("/demo/") ||
+      c.req.method === "OPTIONS"
+    ) {
+      return next();
+    }
     const key = bearerKey(c.req.header("authorization"));
     const principal = key === null ? null : await resolvePrincipal(db, key);
     if (principal === null) throw unauthorized();
@@ -256,6 +279,39 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
       );
     return { origin, allowed: row !== undefined };
   }
+
+  // ----- The public demo job (read-only, no key) -----
+  async function demoJob() {
+    if (deps.demoJobId === undefined) throw notFound("Demo");
+    const [job] = await db.select().from(jobs).where(eq(jobs.id, deps.demoJobId));
+    if (job === undefined) throw notFound("Demo");
+    return job;
+  }
+
+  app.get("/demo", async (c) => {
+    const job = await demoJob();
+    const [decisionsList, agentsList, payeesList, audit] = await Promise.all([
+      jobDecisions(db, job.ownerId, job.id),
+      jobAgents(db, job.ownerId, job.id),
+      jobPayees(db, job.ownerId, job.id),
+      auditStatus(db),
+    ]);
+    return c.json({
+      job: jobView(job),
+      decisions: decisionsList,
+      agents: agentsList,
+      payees: payeesList,
+      anchor: audit.ok ? audit.latestAnchor : null,
+    });
+  });
+
+  app.get("/demo/decisions/:id", async (c) => {
+    const job = await demoJob();
+    const evidence = await decisionEvidence(db, job.ownerId, c.req.param("id"));
+    // Only the demo job's decisions are public.
+    if (evidence.job.id !== job.id) throw notFound("Decision");
+    return c.json(evidence);
+  });
 
   /** Who this key belongs to. */
   app.get("/me", async (c) => {
@@ -612,6 +668,7 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
         payee: { kind: "X402_ORIGIN", value: origin },
         amount: input.maxPrice,
         reasoning: input.reasoning,
+        resourceUrl: input.url,
       });
       return c.json(decisionView(denied.decision, denied.authorization, denied.replayed), 200);
     }

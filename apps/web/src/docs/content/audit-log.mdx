@@ -1,0 +1,88 @@
+An audit trail is only worth something if it can't be quietly edited. Bursar's log is **hash-chained**, so changing any past entry breaks every entry after it. It is also **anchored on Arc**, so the newest hash is public and fixed. You don't have to trust Bursar's word that the history is intact: you can check it yourself.
+
+## What goes in the log
+
+Two kinds of entries, written in the **same database transaction** as the change they describe, so a change and its log entry succeed or fail together:
+
+- **`decision`**: every payment request, allowed, denied or waiting: which agent, the payee, the amount, the category or invoice reference, the agent's reasoning, the result and reason, every check with its outcome, the budget left, the rules version, and the time.
+- **`transition`**: every change of a payment's state afterwards: from and to, the amount, the time, the vault, payment and refund transaction hashes, the reason, and the approval verdict if a person decided.
+
+Entries are append-only: the database itself refuses to update or delete them.
+
+## How the chain works
+
+Every entry has a sequence number (`seq`, starting at 1 with no gaps) and three hashes:
+
+```text
+payloadHash = sha256( canonicalJson(payload) )
+hash        = sha256( prevHash ‖ seq as 8 bytes, big-endian ‖ payloadHash )
+```
+
+- `prevHash` is the previous entry's `hash`. For the first entry it's 32 zero bytes.
+- `‖` joins the raw bytes (the hashes are 32 bytes each, written as `0x…` hex).
+- `canonicalJson` is JSON with object keys sorted, no extra spaces, big numbers as strings and dates as ISO 8601 strings, so the same payload always gives the same text.
+
+Because each hash covers the one before it, the newest hash commits to the entire history. Edit, remove or reorder anything, and it no longer matches.
+
+## Anchoring on Arc
+
+Every **10 minutes**, or sooner once **50** new entries have been added, Bursar posts the newest `hash` and its `seq` to the [AuditAnchor contract](/docs/contracts#auditanchor). The contract accepts anchors only in order and never lets them go backwards, so anchors can't be skipped, replaced or replayed.
+
+An anchored hash is permanent. From that moment, nobody, including whoever runs Bursar's database, can rewrite any entry up to that point without the mismatch showing.
+
+On a decision's evidence page, the last step shows either "Anchored on Arc · #N" with its transaction, or "Logged, waiting for the next anchor".
+
+## Checking it yourself
+
+### In the console
+
+Open any decision's evidence page and press **Verify**. Your browser downloads that decision's log entries, recomputes every `payloadHash` and `hash` itself, and checks each links to the one before. "Hashes match, checked in your browser" means the entries are exactly what was logged. The server's own answer isn't used.
+
+### From the API
+
+As an owner:
+
+- `GET /jobs/:id/audit` returns a job's entries (`seq`, `event`, `payload`, `payloadHash`, `prevHash`, `hash`, time) and the anchor covering each.
+- `GET /audit/status` recomputes the whole log and checks it against the latest anchor: `{ ok, entries, head, latestAnchor, matchesAnchor, problem }`. It reveals no other business's data, only pass or fail and the head.
+
+### With your own code
+
+To verify an entry independently:
+
+```js
+import { createHash } from "node:crypto";
+
+function canonicalJson(v) {
+  if (v === null || v === undefined) return "null";
+  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(",")}]`;
+  if (typeof v === "object") {
+    const keys = Object.keys(v).filter((k) => v[k] !== undefined).sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(v[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(v);
+}
+
+const sha256 = (data) => "0x" + createHash("sha256").update(data).digest("hex");
+
+function entryHash(prevHash, seq, payloadHash) {
+  const seqBytes = Buffer.alloc(8);
+  seqBytes.writeBigUInt64BE(BigInt(seq));
+  return sha256(Buffer.concat([
+    Buffer.from(prevHash.slice(2), "hex"),
+    seqBytes,
+    Buffer.from(payloadHash.slice(2), "hex"),
+  ]));
+}
+
+// For each entry from GET /jobs/:id/audit:
+//   sha256(canonicalJson(entry.payload)) === entry.payloadHash
+//   entryHash(entry.prevHash, entry.seq, entry.payloadHash) === entry.hash
+```
+
+Then read the anchor from Arc (`anchors(seq)` on AuditAnchor) and compare its `head` with the `hash` of the entry at that `seq`.
+
+## Limits of the log
+
+- **Only anchored history is fixed.** Entries newer than the latest anchor (at most ten minutes' worth) could, in principle, be rewritten by someone with database access before the next anchor. Anything already anchored cannot.
+- **One chain for the whole deployment.** Owners see payloads only for their own jobs; `/audit/status` checks the whole chain but reveals only pass/fail and the head.
+- **The log began on September 28, 2026, while Bursar was being built.** Decisions made earlier were added once, in order, when the log was introduced; their earlier state changes aren't in it.

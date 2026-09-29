@@ -1,0 +1,59 @@
+When Bursar denies a payment, it says exactly why with one of the codes below. Checks run in a **fixed order** and the first one that fails is the reason, so the same request under the same conditions always gets the same answer. Nothing is reserved or paid for a denied request, but the attempt is still recorded, with the agent's reasoning, on the job page and in the audit log.
+
+## In the order they're checked
+
+| # | Code | Denied when | What the agent should do |
+|---|---|---|---|
+| 1 | `JOB_NOT_ACTIVE` | The job is paused, closed, or not live on-chain yet. | Stop. The owner has paused or ended the work. |
+| 2 | `JOB_EXPIRED` | The job's end date has passed. | Stop. Nothing more can be paid on this job. |
+| 3 | `AGENT_NOT_IN_JOB` | The key's agent doesn't belong to this job. | Check the key's configuration. |
+| 4 | `AGENT_REVOKED` | The agent, or any agent above it, has been revoked. | Stop. The owner switched this agent off. |
+| 5 | `INVALID_AMOUNT` | The amount is zero. | Fix the request. |
+| 6 | `PAYEE_NOT_ALLOWED` | The seller's origin or the wallet isn't on the job's list. | Choose a payee from `list_sellers`. Bursar never contacts sellers that aren't on the list. |
+| 7 | `PER_TX_CAP_EXCEEDED` | The amount is bigger than the job's per-payment cap. | Buy something smaller, or ask the owner. Splitting one purchase to dodge the cap is visible on the job page. |
+| 8 | `AGENT_LIMIT_EXCEEDED` | It would take this agent, or any agent above it, past its limit. Helpers' spending counts against every limit up the tree. | Ask for less, or stop and report back. |
+| 9 | `CATEGORY_BUDGET_EXCEEDED` | It would take the payee's category (like `images`) past its limit. | Spend in another category, or stop. |
+| 10 | `JOB_BUDGET_EXCEEDED` | It would take the whole job past its budget, counting everything settled, held, waiting for approval or stuck. | Stop, and tell the owner the budget is spent. |
+| 11 | `JOB_UNDERFUNDED` | The vault holds less than the job has committed plus this amount (the budget wasn't fully deposited). | Wait for the owner to deposit more. |
+| 12 | `RATE_LIMITED` | It would exceed the job's spending window (for example, the most per hour). | Wait for the window to roll over, then try again. |
+
+If all twelve pass, the payment is either **allowed** (at or below the approval threshold) or **needs approval** (above it).
+
+<Callout>
+
+Each decision includes a `checks` list with every check and whether it passed, in this order. The evidence page for any decision shows the same list. It answers "why was this blocked?" without guessing.
+
+</Callout>
+
+## The same rules, on-chain
+
+The job-wide rules are enforced a second time by the JobVault contract, which re-checks every release itself before any money moves. If Bursar's server were ever compromised and skipped a check, the vault would still refuse:
+
+| Bursar code | JobVault error |
+|---|---|
+| `JOB_NOT_ACTIVE` | `JobNotActive`, `JobClosed` |
+| `JOB_EXPIRED` | `JobExpired` (by chain time) |
+| `INVALID_AMOUNT` | `ZeroAmount` |
+| `PAYEE_NOT_ALLOWED` | `PayeeNotAllowed` |
+| `PER_TX_CAP_EXCEEDED` | `PerTxCapExceeded` |
+| `JOB_BUDGET_EXCEEDED` | `BudgetExceeded` |
+| `JOB_UNDERFUNDED` | `Underfunded` |
+| `RATE_LIMITED` | `RateLimited` |
+
+The vault also refuses a release above the threshold without a valid approval (`ApprovalRequired`, `BadApproval`), a reused operation id (`OpAlreadyUsed`), and a release decided under old rules (`StalePolicy`).
+
+The per-agent checks (`AGENT_NOT_IN_JOB`, `AGENT_REVOKED`, `AGENT_LIMIT_EXCEEDED`) and categories are enforced by Bursar only: agents aren't on-chain identities. The job-wide envelope above still caps what any agent can do. See [Security model](/docs/security).
+
+## Other errors that aren't denials
+
+Some requests fail before a decision is made, so nothing is recorded:
+
+| Code | When |
+|---|---|
+| `PRICE_ABOVE_MAX` | The seller's quote is above the agent's `maxPrice`. |
+| `QUOTE_FAILED` | The seller didn't return a valid x402 price. |
+| `BAD_REQUEST` | A field is missing or malformed, for example an `operationId` shorter than 8 characters. |
+| `UNAUTHORIZED` | The key is unknown, revoked or replaced. |
+| `OPERATION_ID_IN_USE` | Another agent on the job already used this `operationId`. |
+
+The full list, with HTTP statuses, is in the [HTTP API reference](/docs/http-api#errors).

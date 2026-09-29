@@ -98,10 +98,53 @@ export function ErrorLine({ error }: { error: unknown }) {
   return <p className="text-sm text-blocked">{message}</p>;
 }
 
-export function Initial({ name }: { name: string }) {
+/** FNV-1a, enough to spread agent ids over the pattern bits. */
+function hash32(text: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+/**
+ * An agent's mark: a 5×5 mirrored pattern drawn from its id, in greys only, so the same agent
+ * always looks the same and colour stays reserved for status.
+ */
+export function AgentMark({ id, name }: { id: string; name: string }) {
+  let bits = hash32(id);
+  // Never blank: an empty pattern would read as a missing avatar.
+  if ((bits & 0x7fff) === 0) bits |= 0x4a52;
+  const shade = 0.55 + ((bits >>> 15) % 4) * 0.12;
+  const cells: { x: number; y: number }[] = [];
+  for (let y = 0; y < 5; y += 1) {
+    for (let x = 0; x < 3; x += 1) {
+      if ((bits >>> (y * 3 + x)) & 1) {
+        cells.push({ x, y });
+        if (x < 2) cells.push({ x: 4 - x, y });
+      }
+    }
+  }
   return (
-    <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-track text-[11px] font-medium">
-      {name.charAt(0).toUpperCase()}
-    </span>
+    <svg
+      viewBox="-1 -1 7 7"
+      className="size-6 shrink-0 rounded-md bg-track text-ink"
+      role="img"
+      aria-label={name}
+    >
+      <title>{name}</title>
+      {cells.map((c) => (
+        <rect
+          key={`${c.x}-${c.y}`}
+          x={c.x}
+          y={c.y}
+          width="1"
+          height="1"
+          fill="currentColor"
+          opacity={shade}
+        />
+      ))}
+    </svg>
   );
 }

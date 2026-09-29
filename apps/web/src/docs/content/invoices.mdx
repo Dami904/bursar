@@ -1,0 +1,47 @@
+Not everything an agent pays for is an x402 purchase. A voice-over artist sends an invoice, a freelancer finishes a translation, a partner bills for data. Bursar's **invoice lane** lets an agent pay those from the job's funds, under exactly the same rules and approvals as a purchase, straight to the vendor's wallet.
+
+## How an invoice payment works
+
+1. The owner adds the vendor's wallet address as a payee (with a label, like "Voice-over artist") and allows it in the vault.
+2. The agent calls `pay_invoice` (MCP) or `POST /spend/invoice` (HTTP) with the vendor's address, the amount, the vendor's invoice number, and its reasoning.
+3. Bursar runs the same checks as any payment: payee on the list, per-payment cap, agent and category limits, budget, window. Above the approval threshold, it waits for a person.
+4. Once allowed (or approved), the vault releases the amount **directly to the vendor's wallet**. The vault's release *is* the payment: there's no middle step and no seller to answer.
+5. The job page records it as an invoice, with its reference number, and the payment is settled as soon as the release is confirmed on Arc.
+
+## Paying one
+
+With the MCP server:
+
+```text
+The voice-over artist sent invoice VO-12 for 0.08 USDC for the narration, delivered and checked.
+Pay it to their wallet on the allow-list.
+```
+
+The agent looks up the wallet with `list_sellers` (wallet payees are listed with their labels) and calls `pay_invoice`.
+
+With HTTP:
+
+```bash
+curl -X POST $BURSAR_API_URL/spend/invoice \
+  -H "authorization: Bearer $BURSAR_AGENT_KEY" \
+  -H "content-type: application/json" \
+  -d '{
+    "operationId": "invoice-vo-12",
+    "payee": "0x4A25223e...",
+    "amount": "0.08",
+    "invoiceRef": "VO-12",
+    "reasoning": "Narration delivered and checked; invoice VO-12 as agreed."
+  }'
+```
+
+Use the invoice number in the `operationId` (as above) and a retry can never pay the same invoice twice: Bursar returns the original decision instead of making a new one.
+
+## What approvers see
+
+An invoice above the threshold appears in **Approvals** like any payment, with the agent's reasoning. The approval your wallet signs names the **vendor's address** as the recipient, so the signature can only pay that vendor that amount.
+
+## Things to know
+
+- **Allow vendors in both places.** Bursar's list decides what the agent may attempt; the vault's list decides where money can actually go. If a vendor is in Bursar but not allowed in the vault, the vault refuses the release (`PayeeNotAllowed`), nothing moves, and the amount returns to the budget with that reason. The job page's **Allow in vault** button fixes it.
+- **An invoice is a reference and an amount.** Bursar doesn't store invoice files or check that work was delivered. That judgement is the agent's (and yours, above the threshold). The agent's reasoning is recorded with the payment.
+- **Only wallets.** Invoices go to `0x…` payees. To pay an x402 seller, use `purchase`.

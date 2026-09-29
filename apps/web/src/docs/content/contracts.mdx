@@ -1,0 +1,71 @@
+Bursar's money and its audit trail live in two small contracts on Arc testnet. Both are verified on the explorer, so you can read their source and every transaction.
+
+## Network
+
+| | |
+|---|---|
+| Network | Arc testnet |
+| Chain id | `5042002` |
+| Gas | Paid in USDC (Arc's native gas token) |
+| Explorer | [explorer.testnet.arc.io](https://explorer.testnet.arc.io) |
+
+## Addresses
+
+| Contract | Address |
+|---|---|
+| **JobVault**: holds every job's USDC and enforces its rules | [`0x5Cd51a31fE931D31574Eadd083A0B5c210CA2cB6`](https://explorer.testnet.arc.io/address/0x5Cd51a31fE931D31574Eadd083A0B5c210CA2cB6) |
+| **AuditAnchor**: records the head of Bursar's decision log | [`0x8f919903261AB618537DC0a114E6B46C99Db8727`](https://explorer.testnet.arc.io/address/0x8f919903261AB618537DC0a114E6B46C99Db8727) |
+| **USDC** (ERC-20 interface, 6 decimals) | [`0x3600000000000000000000000000000000000000`](https://explorer.testnet.arc.io/address/0x3600000000000000000000000000000000000000) |
+| **Bursar operator**: the only address allowed to call `release`, `refund` and `anchor` | [`0xC2D41C50Ef647B0Ae52aA3afEa5dD876d27E6deE`](https://explorer.testnet.arc.io/address/0xC2D41C50Ef647B0Ae52aA3afEa5dD876d27E6deE) |
+
+## JobVault
+
+One contract holds every job, keyed by a `bytes32` job id. Bursar derives the ids from its own records, so you can match any on-chain event to a job and a payment:
+
+```text
+vault job id  = keccak256("bursar:job:" + <Bursar job id>)
+operation id  = keccak256("bursar:op:" + <payment id>)
+```
+
+### Who can call what
+
+| Function | Who | What it does |
+|---|---|---|
+| `createJob(jobId, params)` | Anyone (becomes the owner) | Opens a job with its budget, per-payment cap, approval threshold, spending window, expiry and payment wallet. |
+| `fund(jobId, amount)` / `fundWithPermit(…)` | Anyone | Deposits USDC. Deposits from anyone but the owner show up in Bursar as revenue. |
+| `setBudget`, `setLimits` | Owner | Change the budget, caps, threshold or window. Each change bumps the job's `policyVersion`. |
+| `setPayee(jobId, payee, allowed)` | Owner | Allow or remove a wallet payee. |
+| `setApprover(jobId, approver, allowed)` | Owner | Allow or remove an approver. |
+| `pause(jobId)` | Owner or operator | Stops all releases. |
+| `unpause(jobId)` | Owner only | Resumes a paused job. |
+| `closeJob(jobId)` | Owner | Closes for good and returns all unspent USDC to the owner. |
+| `release(jobId, opId, to, amount, expectedPolicyVersion, approval)` | Operator | Pays one operation, after re-checking every job rule, the approval signature if needed, and that `opId` was never used. |
+| `refund(jobId, opId, amount)` | Operator | Credits back USDC returned for a failed payment. Only what has actually arrived, at most what was released, once per operation. |
+
+Read-only helpers: `getJob(jobId)`, `available(jobId)` (deposited minus spent minus withdrawn), `isPayee`, `isApprover`, `approvalDigest(…)` and `domainSeparator()`.
+
+### Events
+
+| Event | Emitted when |
+|---|---|
+| `JobCreated(jobId, owner, params)` | A job is opened. |
+| `Funded(jobId, from, amount)` | USDC is deposited. |
+| `Released(jobId, opId, to, amount, approved)` | A payment leaves the vault. `approved` is true when a signed approval was used. |
+| `Refunded(jobId, opId, amount)` | Returned money is credited back. |
+| `BudgetChanged`, `LimitsChanged`, `PayeeChanged`, `ApproverChanged`, `StatusChanged` | The owner (or, for pausing, the operator) changed the job. Each carries the new `policyVersion`. |
+| `Withdrawn(jobId, to, amount)` | Unspent USDC went back to the owner when the job closed. |
+
+Bursar's indexer watches every `Released` event. One it can't match to a payment of that job freezes the job at once. See [Security model](/docs/security).
+
+## AuditAnchor
+
+A tiny contract with one job: record the newest hash of Bursar's [audit log](/docs/audit-log).
+
+```solidity
+function anchor(bytes32 head, uint64 seq, uint64 decisions) external;   // operator only
+function anchors(uint64 seq) external view returns (bytes32 head, uint64 decisions, uint64 timestamp);
+function latestSeq() external view returns (uint64);
+event Anchored(uint64 indexed seq, bytes32 head, uint64 decisions, uint64 timestamp);
+```
+
+Anchors must be posted in order (`seq` is exactly the last one plus one) and the count of decisions covered can never go down. So anchors can't be skipped, replaced or replayed. It holds no money.

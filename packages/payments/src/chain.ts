@@ -24,6 +24,8 @@ export const jobVaultAbi = parseAbi([
   "function setPayee(bytes32 jobId, address payee, bool allowed)",
   "function setApprover(bytes32 jobId, address approver, bool allowed)",
   "function pause(bytes32 jobId)",
+  "function unpause(bytes32 jobId)",
+  "function closeJob(bytes32 jobId)",
   "function refunded(bytes32 jobId, bytes32 opId) view returns (bool)",
   "function release(bytes32 jobId, bytes32 opId, address to, uint128 amount, uint64 expectedPolicyVersion, Approval approval)",
   "function refund(bytes32 jobId, bytes32 opId, uint128 amount)",

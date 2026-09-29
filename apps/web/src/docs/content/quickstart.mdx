@@ -1,0 +1,57 @@
+By the end of this page, an AI agent of yours will be able to pay for things from a budget you set, and nothing past it. You need a browser wallet (MetaMask, Rabby, or any WalletConnect wallet) with some testnet USDC on Arc, and an agent: Claude Code, Cursor, Claude Desktop, or your own code.
+
+<Callout>
+
+Need testnet USDC? Circle's testnet faucet gives it out free. On Arc, gas is also paid in USDC, so one balance covers everything: the job's budget and the few cents of fees your wallet pays to set it up.
+
+</Callout>
+
+## 1. Create a job
+
+Open the [console](/login) and sign in with your wallet. Signing in is a free signature (Sign-In with Ethereum), not a transaction. Then choose **New job** and fill in:
+
+- **Title and customer**: what the job is and who it's for. Only you see these.
+- **Budget**: the most this job can ever spend, in USDC. Your wallet deposits exactly this into the vault.
+- **Ask me above**: payments larger than this wait for your approval. Set it to `0` to approve everything yourself, or to the budget to approve nothing by hand.
+- **Ends in**: after this many days the job stops paying anyone, whatever is left.
+- **What should the agent do?** (optional): a brief for Bursar's own AI operator. Leave it empty if you're bringing your own agent.
+
+Next, add **who can be paid**: a seller's web address (for x402 purchases, for example `https://api.seller.com`) or a vendor's `0x…` wallet address (for invoices). Anything not on this list is refused.
+
+The last step runs on Arc from your wallet, one confirmation at a time: create the job, open it in the vault, allow and make the deposit, register your wallet as the job's approver, and allow any vendor wallets. The console shows each step as it completes. See [Create and fund a job](/docs/jobs) for what each one does.
+
+## 2. Add an agent
+
+On the job page, under **Agents**, type a name and add the agent. Bursar shows its key **once**. It starts with `bsr_agt_`. Copy it somewhere safe: anyone holding it can spend within this job's rules, and nothing more. You can revoke it or replace it any time, and it stops working the moment you do.
+
+## 3. Connect it
+
+Pick your agent below. Replace the placeholder with the key you copied (the console's own "Connect your agent" box fills it in for you).
+
+<ConnectTabs agentKey="bsr_agt_…" />
+
+For Claude Code, that's all. For Cursor or Claude Desktop, paste the JSON into the app's MCP settings and restart it. For anything else, use the [HTTP API](/docs/http-api) directly. [Connect your agent](/docs/connect) has the details for each.
+
+## 4. Let it work
+
+Ask your agent for something that costs money. For example:
+
+```text
+Check my Bursar budget, then buy the market report from an allowed seller and summarise it.
+```
+
+A well-behaved agent will call `get_budget`, then `list_sellers` to see what's on offer, then `purchase`. Watch the job page while it works: the payment appears within a second, with the agent's reasoning next to it.
+
+- If the amount is **at or below** your "Ask me above" setting, Bursar pays and the agent gets the content back straight away.
+- If it's **above**, the payment waits for you. You'll see it under **Approvals** (and on Telegram, if you've [connected it](/docs/alerts)). Approve it with your wallet and the payment goes through; the agent picks up the result with `check_payment`.
+
+## 5. See what Bursar stops
+
+Try asking the agent to buy from a seller that isn't on your list, or something bigger than the budget allows. Bursar refuses, pays nothing, and tells the agent why, with a code like `PAYEE_NOT_ALLOWED` or `JOB_BUDGET_EXCEEDED`. The attempt still shows on the job page as **Blocked**, reasoning and all. The full list is on [Refusal codes](/docs/refusal-codes).
+
+## Next steps
+
+- [Core ideas](/docs/core-ideas): how jobs, agents, limits and the vault fit together.
+- [Agents, helpers and replacements](/docs/agents): let your agent start helpers with their own smaller limits.
+- [Alerts and Telegram](/docs/alerts): get approvals on your phone.
+- The [live demo](/demo) shows a job doing all of this on its own, around the clock.

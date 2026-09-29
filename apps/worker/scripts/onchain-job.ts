@@ -3,7 +3,7 @@
  * JobVault. The owner key is the arc-canteen dev wallet, read from ~/.arc-canteen/wallet.yaml at
  * run time and never written anywhere else.
  *
- *   pnpm --filter @bursar/worker onchain:job <vaultJobId> <agentWallet> <budget> <perTxCap> <threshold> <windowCap> <fund>
+ *   pnpm --filter @bursar/worker onchain:job <vaultJobId> <agentWallet> <budget> <perTxCap> <threshold> <windowCap> <fund> [expiryUnixSeconds]
  *   (amounts in USDC, e.g. 0.50)
  */
 import { readFileSync } from "node:fs";
@@ -17,7 +17,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { arcTestnet } from "viem/chains";
 
 process.loadEnvFile(fileURLToPath(new URL("../../../.env", import.meta.url)));
-const [vaultJobId, agentWallet, budget, perTxCap, threshold, windowCap, fund] =
+const [vaultJobId, agentWallet, budget, perTxCap, threshold, windowCap, fund, expiryArg] =
   process.argv.slice(2);
 if (
   vaultJobId === undefined ||
@@ -70,7 +70,8 @@ await send(
         approvalThreshold: parseUsdc(threshold),
         windowCap: parseUsdc(windowCap),
         window: 3600n,
-        expiry: BigInt(Math.floor(Date.now() / 1000) + 7 * 86400),
+        // Match the job's expiresAt in Bursar when given; otherwise a week.
+        expiry: BigInt(expiryArg ?? Math.floor(Date.now() / 1000) + 7 * 86400),
       },
     ],
   }),

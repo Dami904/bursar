@@ -111,7 +111,7 @@ export function Settings() {
       )}
 
       <div className="mt-4 space-y-3 border-t border-line pt-4">
-        {s.telegram && (
+        {s.telegram && !s.targets.some((t) => t.kind === "TELEGRAM") && (
           <Button
             className="w-full"
             disabled={telegram.isPending}

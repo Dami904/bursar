@@ -9,7 +9,8 @@ import { api, type Agent, type Job } from "../lib/api.js";
 import { config } from "../lib/config.js";
 import { money, shortAddress } from "../lib/format.js";
 import { wagmiConfig } from "../lib/wagmi.js";
-import { Button, Card, Dot, ErrorLine, Initial } from "./ui.js";
+import { ConnectTabs } from "./Connect.js";
+import { Button, Card, Dot, ErrorLine, AgentMark } from "./ui.js";
 
 const field =
   "min-w-0 flex-1 rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-muted";
@@ -40,6 +41,14 @@ export function KeyReveal({ agentKey, onDone }: { agentKey: string; onDone?: () 
           {copied ? <Check size={14} /> : <Copy size={14} />}
         </Button>
       </div>
+      <details className="mt-3">
+        <summary className="cursor-pointer text-xs text-muted hover:text-ink">
+          Connect your agent
+        </summary>
+        <div className="mt-3">
+          <ConnectTabs agentKey={agentKey} />
+        </div>
+      </details>
       {onDone && (
         <button className="mt-3 text-xs text-muted underline" onClick={onDone}>
           Done, hide it
@@ -53,7 +62,16 @@ export function KeyReveal({ agentKey, onDone }: { agentKey: string; onDone?: () 
  * The agent tree, in one straight column. Sub-agents (spawned by the agent above them) are marked
  * with ↳. Each live agent can be replaced (fresh key, same place, only what was left) or revoked.
  */
-export function AgentsSection({ jobId, agents }: { jobId: string; agents: Agent[] }) {
+export function AgentsSection({
+  jobId,
+  agents,
+  readOnly = false,
+}: {
+  jobId: string;
+  agents: Agent[];
+  /** Closed jobs: show the tree, offer no actions. */
+  readOnly?: boolean;
+}) {
   const queryClient = useQueryClient();
   const [newKey, setNewKey] = useState<string | null>(null);
   const [showPast, setShowPast] = useState(false);
@@ -86,7 +104,7 @@ export function AgentsSection({ jobId, agents }: { jobId: string; agents: Agent[
     );
   const render = (agent: Agent, depth: number): React.ReactNode => (
     <div key={agent.id}>
-      <AgentRow agent={agent} depth={depth} onKey={setNewKey} />
+      <AgentRow agent={agent} depth={depth} onKey={setNewKey} readOnly={readOnly} />
       {visible.filter((c) => c.parentAgentId === agent.id).map((c) => render(c, depth + 1))}
     </div>
   );
@@ -98,45 +116,47 @@ export function AgentsSection({ jobId, agents }: { jobId: string; agents: Agent[
         <p className="border-t border-line py-4 text-sm text-muted">No agents yet.</p>
       )}
       {children(null).map((a) => render(a, 0))}
-      <div className="flex items-center justify-between border-t border-line pt-2 text-xs text-muted">
-        {adding ? (
-          <form
-            className="flex w-full gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (name.trim() !== "") add.mutate();
-            }}
-          >
-            <input
-              className={field}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Agent name"
-              autoFocus
-            />
-            <Button primary disabled={add.isPending || name.trim() === ""}>
-              Add
-            </Button>
-          </form>
-        ) : (
-          <>
-            <button
-              className="flex items-center gap-1 hover:text-ink"
-              onClick={() => setAdding(true)}
+      {!readOnly && (
+        <div className="flex items-center justify-between border-t border-line pt-2 text-xs text-muted">
+          {adding ? (
+            <form
+              className="flex w-full gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (name.trim() !== "") add.mutate();
+              }}
             >
-              <Plus size={12} /> Add agent
-            </button>
-            {past.length > 0 && (
+              <input
+                className={field}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Agent name"
+                autoFocus
+              />
+              <Button primary disabled={add.isPending || name.trim() === ""}>
+                Add
+              </Button>
+            </form>
+          ) : (
+            <>
               <button
-                className="flex items-center gap-1.5 hover:text-ink"
-                onClick={() => setShowPast(!showPast)}
+                className="flex items-center gap-1 hover:text-ink"
+                onClick={() => setAdding(true)}
               >
-                <Dot tone="muted" /> {showPast ? "Hide" : "Show"} {past.length} past
+                <Plus size={12} /> Add agent
               </button>
-            )}
-          </>
-        )}
-      </div>
+              {past.length > 0 && (
+                <button
+                  className="flex items-center gap-1.5 hover:text-ink"
+                  onClick={() => setShowPast(!showPast)}
+                >
+                  <Dot tone="muted" /> {showPast ? "Hide" : "Show"} {past.length} past
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
       <ErrorLine error={add.error} />
     </div>
   );
@@ -146,10 +166,12 @@ function AgentRow({
   agent,
   depth,
   onKey,
+  readOnly,
 }: {
   agent: Agent;
   depth: number;
   onKey: (key: string) => void;
+  readOnly: boolean;
 }) {
   const queryClient = useQueryClient();
   const [menu, setMenu] = useState(false);
@@ -179,7 +201,7 @@ function AgentRow({
     <div className={`border-t border-line py-2.5 ${gone ? "opacity-50" : ""}`}>
       <div className="flex items-center justify-between gap-2 text-sm">
         <span className="flex min-w-0 items-center gap-2">
-          <Initial name={displayName(agent.name)} />
+          <AgentMark id={agent.id} name={displayName(agent.name)} />
           {depth > 0 && (
             <span className="text-muted" aria-label="sub-agent of the agent above">
               ↳
@@ -194,7 +216,7 @@ function AgentRow({
             {money(agent.committed)}
             {limit !== null && ` / ${money(agent.spendLimit ?? "0")}`}
           </span>
-          {!gone && (
+          {!gone && !readOnly && (
             <button
               className="rounded-full p-1 text-muted hover:bg-surface hover:text-ink"
               aria-label={`Actions for ${displayName(agent.name)}`}
@@ -236,7 +258,7 @@ function AgentRow({
   );
 }
 
-interface Payee {
+export interface Payee {
   id: string;
   kind: "X402_ORIGIN" | "ADDRESS";
   value: string;
@@ -247,12 +269,23 @@ interface Payee {
  * Who the job may pay. Sellers (websites) only need to be listed here; vendors (wallets) are
  * paid straight from the vault, so the vault must allow them too, from the owner's wallet.
  */
-export function PayeesSection({ job }: { job: Job }) {
+export function PayeesSection({
+  job,
+  readOnly = false,
+  given,
+}: {
+  job: Job;
+  readOnly?: boolean;
+  /** Payees already loaded (the public demo); otherwise they're fetched for the owner. */
+  given?: Payee[];
+}) {
   const queryClient = useQueryClient();
-  const payees = useQuery({
+  const fetched = useQuery({
     queryKey: ["payees", job.id],
     queryFn: () => api<{ payees: Payee[] }>(`/jobs/${job.id}/payees`),
+    enabled: given === undefined,
   });
+  const payees = given === undefined ? fetched : { data: { payees: given } };
   const [value, setValue] = useState("");
   const [label, setLabel] = useState("");
   const kind = /^0x[0-9a-fA-F]{40}$/.test(value.trim()) ? "ADDRESS" : "X402_ORIGIN";
@@ -278,37 +311,39 @@ export function PayeesSection({ job }: { job: Job }) {
         </p>
       )}
       {payees.data?.payees.map((p) => (
-        <PayeeRow key={p.id} payee={p} job={job} />
+        <PayeeRow key={p.id} payee={p} job={job} readOnly={readOnly} />
       ))}
-      <form
-        className="flex gap-2 border-t border-line pt-3"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (ok) add.mutate();
-        }}
-      >
-        <input
-          className={field}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder="URL or 0x…"
-        />
-        <input
-          className={`${field} max-w-24`}
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-          placeholder="Name"
-        />
-        <Button aria-label="Add payee" disabled={!ok || add.isPending}>
-          <Plus size={14} />
-        </Button>
-      </form>
+      {!readOnly && (
+        <form
+          className="flex gap-2 border-t border-line pt-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (ok) add.mutate();
+          }}
+        >
+          <input
+            className={field}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="URL or 0x…"
+          />
+          <input
+            className={`${field} max-w-24`}
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="Name"
+          />
+          <Button aria-label="Add payee" disabled={!ok || add.isPending}>
+            <Plus size={14} />
+          </Button>
+        </form>
+      )}
       <ErrorLine error={add.error} />
     </div>
   );
 }
 
-function PayeeRow({ payee, job }: { payee: Payee; job: Job }) {
+function PayeeRow({ payee, job, readOnly }: { payee: Payee; job: Job; readOnly: boolean }) {
   const vendor = payee.kind === "ADDRESS";
   const vaultJobId = job.onChain.vaultJobId as Hex | null;
   const allowed = useReadContract({
@@ -350,7 +385,7 @@ function PayeeRow({ payee, job }: { payee: Payee; job: Job }) {
         {vendor &&
           (allowed.data === true ? (
             <span className="text-xs text-paid">Allowed</span>
-          ) : allowed.data === false ? (
+          ) : allowed.data === false && !readOnly ? (
             <Button disabled={allow.isPending} onClick={() => allow.mutate()}>
               {allow.isPending ? "Confirm in wallet…" : "Allow in vault"}
             </Button>

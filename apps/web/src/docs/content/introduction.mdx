@@ -1,0 +1,39 @@
+AI agents are getting good at doing real work: researching, writing, buying data, paying contractors. The moment an agent needs to spend money, you face an uncomfortable choice. Give it a wallet or a card, and nothing but its own judgement stands between a confused or manipulated agent and your balance. Keep it away from money, and it can't finish the job.
+
+Bursar is the middle ground. Instead of a wallet, each agent gets a **Bursar key** tied to one **job**. The job has a budget in USDC, a list of who may be paid, a largest-single-payment cap, and an amount above which you approve payments yourself. Every time an agent wants to pay, Bursar checks the request against those rules, records the decision and the agent's reasoning, and only then moves money. The same rules are written into a smart contract on Arc, so they hold even if our own server were compromised.
+
+## Who Bursar is for
+
+- **Teams running AI agents that buy things**: data, reports, images, API calls, other agents' services. Especially sellers that speak [x402](https://www.x402.org), the HTTP payment protocol, where an agent can pay per request.
+- **Businesses that pay contractors or vendors through agents**, where an agent should be able to settle an agreed invoice without having your wallet.
+- **Anyone who wants a record they can show**: every decision, approval and refusal, with the agent's own explanation, sealed on-chain so it can't be quietly edited later.
+
+## What you get
+
+- **A budget per job, shared by the whole team**. Several agents (and the helpers they start) spend from one budget. They can't overspend it together, even when they ask at the same moment.
+- **Limits an agent can't talk its way past**. A payee list, a per-payment cap, per-agent limits and spending categories. A refused payment comes back with the exact rule, and nothing is paid.
+- **You approve the big ones**. Above your threshold, a payment waits for your wallet's signature, from the console or a Telegram alert.
+- **Money that stays in a vault**. Funds sit in the JobVault contract on Arc. Money leaves only for a payment that passed the job's rules, and only to an allowed payee. You can pause a job instantly, and closing it returns what's left to your wallet.
+- **Evidence for every decision**. Each request, check, approval and on-chain transaction is linked, hash-chained and anchored on Arc.
+- **Works with the agents you have**. One MCP command for Claude Code, Cursor or Claude Desktop, or plain HTTP for anything else.
+
+## How it fits together
+
+1. **You create a job** in the console: its budget, who can be paid, and when you want to approve. Your wallet puts the USDC into the job's vault on Arc.
+2. **You give an agent a key.** It connects through the [MCP server](/docs/mcp-tools) or the [HTTP API](/docs/http-api).
+3. **The agent asks to pay.** Bursar checks every rule in a fixed order ([refusal codes](/docs/refusal-codes)) and reserves the amount so no other agent can spend it at the same time.
+4. **The vault releases the money**, re-checking the job's rules on-chain, and the seller or vendor is paid in USDC.
+5. **Everything is recorded.** You watch it live on the job page, get alerts for anything that needs you, and can verify the whole history yourself.
+
+<Callout>
+
+Bursar runs on **Arc testnet** today. USDC on testnet has no real value, so it's safe to try everything, including letting an agent loose on a real task.
+
+</Callout>
+
+## Where to go next
+
+- **Try it in five minutes:** the [Quickstart](/docs/quickstart).
+- **Understand the model first:** [Core ideas](/docs/core-ideas).
+- **See it running on its own:** the [live demo](/demo) is a real job, run by our AI operator, with every transaction on Arc.
+- **Deciding whether to trust it:** [Security model](/docs/security) and [Known limits](/docs/limitations).

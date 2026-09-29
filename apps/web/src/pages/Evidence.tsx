@@ -46,11 +46,11 @@ interface Evidence {
   anchor: { anchorSeq: number; txHash: string | null; at: string } | null;
 }
 
-export function EvidencePage() {
+export function EvidencePage({ demo = false }: { demo?: boolean }) {
   const { id = "" } = useParams();
   const q = useQuery({
-    queryKey: ["evidence", id],
-    queryFn: () => api<Evidence>(`/decisions/${id}`),
+    queryKey: ["evidence", demo, id],
+    queryFn: () => api<Evidence>(demo ? `/demo/decisions/${id}` : `/decisions/${id}`),
   });
   const [verified, setVerified] = useState<"idle" | "checking" | "ok" | "broken">("idle");
 
@@ -71,7 +71,7 @@ export function EvidencePage() {
 
   return (
     <main className="mx-auto max-w-xl">
-      <Link to={`/app/jobs/${e.job.id}`} className="text-sm text-muted">
+      <Link to={demo ? "/demo" : `/app/jobs/${e.job.id}`} className="text-sm text-muted">
         ← {e.job.title}
       </Link>
       <div className="mt-4 flex items-start justify-between gap-3">

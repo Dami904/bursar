@@ -1,6 +1,14 @@
-import { agents, credentials, issueKey, jobs, type Db } from "@bursar/db";
+import {
+  agents,
+  authorizations,
+  credentials,
+  decisions,
+  issueKey,
+  jobs,
+  type Db,
+} from "@bursar/db";
 import { formatUsdc } from "@bursar/money";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { log } from "./log.js";
 
 /** What one automatic run needs: the brief, and a key that works only for this run. */
@@ -112,10 +120,14 @@ export async function autopilotOnce(deps: AutopilotDeps): Promise<string | null>
   if (credential === undefined) throw new Error("credential insert returned nothing");
 
   const newRevenue = BigInt(claimed.revenue_received) - BigInt(claimed.seen);
-  const brief =
-    claimed.last_run !== null && newRevenue > 0n
-      ? `${claimed.brief}\n\nNew revenue: a customer just paid ${formatUsdc(newRevenue)} USDC into this job.`
-      : claimed.brief;
+  let brief = claimed.brief;
+  if (claimed.last_run !== null && newRevenue > 0n) {
+    brief += `\n\nNew revenue: a customer just paid ${formatUsdc(newRevenue)} USDC into this job.`;
+  }
+  const history = await recentHistory(db, claimed.id);
+  if (history !== "") {
+    brief += `\n\nWhat earlier runs on this job already did (don't repeat a purchase unless the brief asks for more):\n${history}`;
+  }
 
   deps.running.add(claimed.id);
   log.info("autopilot run started", { jobId: claimed.id, newRevenue: newRevenue.toString() });
@@ -157,4 +169,41 @@ export async function autopilotOnce(deps: AutopilotDeps): Promise<string | null>
       deps.running.delete(claimed.id);
     });
   return claimed.id;
+}
+
+/**
+ * A few lines on what the job has already bought or tried, newest first, so each automatic run
+ * knows what earlier runs did. Written by Bursar from its own records, not by a seller.
+ */
+async function recentHistory(db: Db, jobId: string): Promise<string> {
+  const rows = await db
+    .select({
+      amount: decisions.amount,
+      result: decisions.result,
+      reason: decisions.reason,
+      kind: decisions.kind,
+      invoiceRef: decisions.invoiceRef,
+      paymentUrl: authorizations.paymentUrl,
+      payee: decisions.payee,
+      state: authorizations.state,
+      at: decisions.createdAt,
+    })
+    .from(decisions)
+    .leftJoin(authorizations, eq(authorizations.decisionId, decisions.id))
+    .where(eq(decisions.jobId, jobId))
+    .orderBy(desc(decisions.createdAt))
+    .limit(10);
+  return rows
+    .map((d) => {
+      const what =
+        d.kind === "INVOICE" ? `invoice ${d.invoiceRef ?? ""}`.trim() : (d.paymentUrl ?? d.payee);
+      const outcome =
+        d.result === "DENIED"
+          ? `blocked (${d.reason ?? "rule"})`
+          : d.state === "SETTLED"
+            ? "paid"
+            : (d.state ?? "held").toLowerCase().replace(/_/g, " ");
+      return `- ${d.at.toISOString().slice(0, 16).replace("T", " ")}: ${what}, ${formatUsdc(d.amount)} USDC, ${outcome}`;
+    })
+    .join("\n");
 }

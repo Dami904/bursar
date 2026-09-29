@@ -29,6 +29,8 @@ const env = z
     WEB_ORIGINS: z.string().default("http://localhost:5173"),
     /** The Telegram bot's @username (without @), for alert links. */
     TELEGRAM_BOT_USERNAME: z.string().min(1).optional(),
+    /** The job shown read-only at /demo. */
+    DEMO_JOB_ID: z.string().uuid().optional(),
   })
   .parse(process.env);
 
@@ -52,6 +54,7 @@ const app = createApp(db, {
   chain: { chainId: env.ARC_CHAIN_ID, vault: env.JOB_VAULT_ADDRESS as `0x${string}` },
   webOrigins: webOrigins,
   telegramBot: env.TELEGRAM_BOT_USERNAME,
+  demoJobId: env.DEMO_JOB_ID,
   siwe: { domains: webOrigins.map((origin) => new URL(origin).host), chainId: env.ARC_CHAIN_ID },
 });
 

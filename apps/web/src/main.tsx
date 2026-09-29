@@ -5,12 +5,15 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { WagmiProvider } from "wagmi";
 import { Shell } from "./components/Shell.js";
+import { Docs } from "./docs/Docs.js";
 import { SessionProvider, useSession } from "./lib/session.js";
 import { wagmiConfig } from "./lib/wagmi.js";
 import { Approvals } from "./pages/Approvals.js";
+import { Demo, DemoEvidence } from "./pages/Demo.js";
 import { EvidencePage } from "./pages/Evidence.js";
 import { Job } from "./pages/Job.js";
 import { Jobs } from "./pages/Jobs.js";
+import { Landing } from "./pages/landing/Landing.js";
 import { MetricsPage } from "./pages/Metrics.js";
 import { NewJob } from "./pages/NewJob.js";
 import { Settings } from "./pages/Settings.js";
@@ -51,7 +54,12 @@ createRoot(root).render(
         <SessionProvider>
           <BrowserRouter>
             <Routes>
+              <Route path="/" element={<Landing />} />
               <Route path="/login" element={<SignIn />} />
+              <Route path="/demo" element={<Demo />} />
+              <Route path="/demo/decisions/:id" element={<DemoEvidence />} />
+              <Route path="/docs" element={<Navigate to="/docs/introduction" replace />} />
+              <Route path="/docs/:slug" element={<Docs />} />
               <Route
                 path="/app"
                 element={
@@ -68,7 +76,7 @@ createRoot(root).render(
                 <Route path="metrics" element={<MetricsPage />} />
                 <Route path="settings" element={<Settings />} />
               </Route>
-              <Route path="*" element={<Navigate to="/app/jobs" replace />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </BrowserRouter>
         </SessionProvider>

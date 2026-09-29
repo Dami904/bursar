@@ -1,0 +1,55 @@
+{
+  "name": "bursar-mcp",
+  "version": "0.1.1",
+  "description": "MCP server that gives any AI agent a Bursar spending key: job budgets, allow-listed payees and approvals, paid in USDC on Arc.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ai-agents",
+    "spending-limits",
+    "usdc",
+    "arc",
+    "x402",
+    "budget",
+    "claude",
+    "cursor"
+  ],
+  "homepage": "https://github.com/Dami904/bursar/tree/main/apps/mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Dami904/bursar.git",
+    "directory": "apps/mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/Dami904/bursar/issues"
+  },
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "bursar-mcp": "dist/main.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "smoke": "tsx scripts/smoke.ts",
+    "prepublishOnly": "pnpm build && vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.2"
+  }
+}

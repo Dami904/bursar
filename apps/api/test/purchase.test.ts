@@ -135,6 +135,12 @@ describe("POST /spend/purchase", () => {
     const response = await call("/spend/purchase", agents[0]!.key, purchase("op-buy-000002"));
     expect(response.body).toMatchObject({ result: "DENIED", reason: "PAYEE_NOT_ALLOWED" });
     expect(sellerHits).toBe(0);
+    // The exact URL asked for is kept, so the refusal says what the agent wanted.
+    const [row] = await db
+      .select({ resourceUrl: decisions.resourceUrl })
+      .from(decisions)
+      .where(eq(decisions.operationId, "op-buy-000002"));
+    expect(row?.resourceUrl).toMatch(/^http.*\/v1\//);
   });
 
   it("refuses a quote above the agent's max price, reserving nothing", async () => {

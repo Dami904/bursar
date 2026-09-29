@@ -1,0 +1,47 @@
+This is what happens between an agent saying "buy this" and a seller being paid, and what protects each step. It follows an x402 purchase; an invoice skips steps 1 and 5.
+
+## 1. Quote
+
+The agent sends the URL it wants and the most it will pay. Before anything leaves Bursar, the URL's origin is compared with the job's allow-list. If the seller isn't on it, the request is denied on the spot, and **Bursar never contacts that server**. Agents can't use Bursar to reach arbitrary URLs.
+
+For allowed sellers, Bursar requests the resource and gets back x402's `402 Payment Required` answer with the price. The request refuses private and local network addresses and doesn't follow redirects. If the price is above the agent's maximum, it stops here.
+
+## 2. Policy
+
+Bursar evaluates the job's rules in a [fixed order](/docs/refusal-codes): job active and not expired, agent valid and not revoked, amount valid, payee allowed, per-payment cap, agent limits up the helper tree, category limit, job budget, funds deposited, spending window. The first failure is the answer. If everything passes, the amount is compared with the approval threshold.
+
+## 3. Reserve
+
+The decision and the reservation are **one database transaction**, taken while holding a lock on the job's row. Two agents asking at the same instant are handled one after the other, and the second sees the first one's reservation. This is what makes a shared budget safe: the team can't jointly overspend, however the requests interleave.
+
+The decision (with the agent's reasoning and every check) and an entry in the [audit log](/docs/audit-log) are written in that same transaction. There is never a payment without a record, or a record without its payment.
+
+If the payment needs approval, it waits here as `PENDING_APPROVAL` with the money held.
+
+## 4. Vault release
+
+Bursar's worker picks up the reserved payment and asks the **JobVault** contract on Arc to release exactly that amount. Before sending, it simulates the call; if the vault would refuse, nothing is sent and the money returns to the budget.
+
+The vault re-checks everything that's on-chain: job active, not expired, payee allowed (or the job's own payment wallet), under the per-payment cap, within the budget and the deposit, within the spending window, operation id never used, rules unchanged since the decision (`policyVersion`), and a valid approval signature if the amount is above the threshold. For a purchase, the money goes to the job's **payment wallet**. For an invoice, it goes straight to the vendor, and the payment is done.
+
+## 5. Wallet signs
+
+Each job has its own payment wallet: a Circle developer-controlled wallet that only ever holds money for payments in flight, topped up with exactly one payment at a time. It signs the x402 payment (a USDC `transferWithAuthorization` for exactly the quoted amount, to the seller's address, valid for a short time) and sends it to the seller with the request.
+
+The seller submits the payment through its x402 facilitator and returns the resource.
+
+## 6. Settled and logged
+
+Bursar confirms the payment on-chain, stores what the seller returned, and marks the payment `SETTLED`. The agent gets the content back, labelled as untrusted. Every state change on the way was appended to the audit log, and within ten minutes the log's newest hash is anchored on Arc.
+
+If the seller never confirms, the payment becomes `UNRESOLVED` until Bursar can prove what happened. See [Payment states](/docs/payment-states#why-unresolved-exists).
+
+## What each layer guarantees
+
+| Layer | Guarantees | Survives a compromised Bursar server? |
+|---|---|---|
+| **Bursar API** | Every rule, per-agent limits, categories, approvals, reasoning, audit trail. | No: it *is* the server. |
+| **JobVault on Arc** | Budget, deposits, per-payment cap, payees, spending window, expiry, approvals, one release per operation. | **Yes.** Only the owner's wallet can change these rules. |
+| **Job payment wallet** | Holds only money that's mid-payment, never the job's balance. | Exposure is limited to payments in flight. |
+
+The [Security model](/docs/security) goes through what an attacker could and couldn't do at each layer.

@@ -1,0 +1,67 @@
+Every allowed or waiting payment moves through a small, fixed set of states. Knowing them tells you exactly where a payment is, and where its money is. A **denied** request never becomes a payment: it's recorded as a decision and stops there.
+
+## The states
+
+| State | Console shows | Where the money is | Final? |
+|---|---|---|---|
+| `PENDING_APPROVAL` | Needs you | Held against the budget, still in the vault. Waiting for a person. | |
+| `RESERVED` | Held | Held against the budget, still in the vault. About to be released. | |
+| `RELEASING` | Held | The vault's release transaction has been sent to Arc. | |
+| `FUNDED_WALLET` | Held | Purchases only: in the job's payment wallet, about to pay the seller. | |
+| `SIGNING` | Held | Purchases only: the x402 payment is signed and with the seller. | |
+| `UNRESOLVED` | Stuck | Left the vault, but the outcome isn't known yet. Bursar is finding out. | |
+| `SETTLED` | Paid | With the seller or vendor. Done. | ✓ |
+| `RELEASED` | (back in budget) | Never left, or came back: returned to the job's budget. | ✓ |
+| `REJECTED` | (back in budget) | A person said no, or nobody answered within two hours. Returned to the budget. | ✓ |
+
+## The paths
+
+A purchase that's allowed straight away:
+
+```text
+RESERVED → RELEASING → FUNDED_WALLET → SIGNING → SETTLED
+```
+
+An invoice, paid straight from the vault to the vendor:
+
+```text
+RESERVED → RELEASING → SETTLED
+```
+
+A payment above the approval threshold starts one step earlier:
+
+```text
+PENDING_APPROVAL → RESERVED → …          (approved)
+PENDING_APPROVAL → REJECTED              (rejected, or no answer in 2 hours)
+```
+
+When something goes wrong, money always ends up either paid or back in the budget, never in between for good:
+
+```text
+RESERVED → RELEASED                      the vault would refuse, so nothing is sent
+RELEASING / FUNDED_WALLET / SIGNING → RELEASED     the payment failed before anyone was paid
+SIGNING → UNRESOLVED → SETTLED           the seller was slow, but it did settle
+SIGNING → UNRESOLVED → RELEASED          it never settled: refunded to the vault
+```
+
+These are the only moves allowed. Bursar's ledger refuses any other change, so a payment can't jump from "waiting" to "paid" without passing through the vault.
+
+## Why UNRESOLVED exists
+
+Paying over the internet has one honest "don't know" moment: the payment is signed and sent to the seller, and then the seller goes silent, or answers with an error after it may already have submitted the payment. Guessing either way is dangerous. Calling it failed could refund money that was actually paid; calling it paid could hide a loss.
+
+So Bursar marks it **UNRESOLVED** and finds out from the chain. It waits until the signed payment has expired by chain time, when it can no longer be settled, and then checks. If the seller did settle, the payment becomes `SETTLED`. If not, the money is sent back from the job's payment wallet to the vault, checked on arrival, and the payment becomes `RELEASED`. You get an alert if this takes longer than 5 minutes.
+
+## How states count against the budget
+
+The budget bar on the job page adds these up:
+
+| Budget bar | States |
+|---|---|
+| **Paid** | `SETTLED` |
+| **Held** | `RESERVED`, `RELEASING`, `FUNDED_WALLET`, `SIGNING` |
+| **Needs you** | `PENDING_APPROVAL` |
+| **Stuck** | `UNRESOLVED` |
+| **Left** | The budget minus all of the above |
+
+Everything except "left" counts as committed. That's what `remaining` in [get_budget](/docs/mcp-tools#get_budget) reports, and what every new request is checked against. That's why two agents can never spend the same money.

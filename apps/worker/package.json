@@ -14,6 +14,7 @@
     "test": "vitest run",
     "onchain:approver": "tsx --conditions=bursar-source scripts/onchain-approver.ts",
     "onchain:payee": "tsx --conditions=bursar-source scripts/onchain-payee.ts",
+    "onchain:status": "tsx --conditions=bursar-source scripts/onchain-status.ts",
     "dev:approve": "tsx --conditions=bursar-source scripts/approve.ts",
     "onchain:pay": "tsx --conditions=bursar-source scripts/pay-revenue.ts"
   },

@@ -20,9 +20,9 @@ Built for the [Tameion Agents Hackathon](https://tameion.thecanteenapp.com/) (Ca
 | [`apps/api`](apps/api)                   | HTTP API: scoped keys, policy, atomic reservations, x402 purchases, approvals                | Working, tested against Postgres                                                     |
 | [`apps/worker`](apps/worker)             | Indexer, purchase executor, reconciler (refunds, approval expiry, stuck-release replacement) | Working live; 10 tests on a local Anvil chain                                        |
 | [`apps/operator`](apps/operator)         | AI operator: tool-use loop on Gemini 3.1 Flash-Lite or Claude, spends only through Bursar    | Working live (Gemini); 7 tests                                                       |
-| [`apps/mcp`](apps/mcp)                   | MCP server for other people's agents                                                         | Planned                                                                              |
+| [`apps/mcp`](apps/mcp)                   | MCP server for other people's agents: six spending tools behind one agent key                | Working live (paid on Arc through Claude-style stdio); 7 tests                       |
 | [`apps/seller`](apps/seller)             | Our x402 paid service, settled by Circle's Facilitator on Arc testnet                        | Working ([day-2 proof](docs/spikes/day-2-payments.md))                               |
-| [`apps/web`](apps/web)                   | Landing page, public demo, operator console                                                  | Planned                                                                              |
+| [`apps/web`](apps/web)                   | Landing page, public demo, quickstart, operator console (wallet sign-in)                     | Working locally; deploy on day 10                                                    |
 
 ## Run it locally
 

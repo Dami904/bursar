@@ -45,6 +45,11 @@ Draft from `PLAN.md` §7 and §8.1.6. Checked against the code as each part is b
 - CORS allows only the configured console origins.
 - The audit log is recomputed in the browser ("Verify"), so an owner doesn't have to trust the server's own "verified" answer.
 
+## The public demo
+
+- `/demo` and `/demo/decisions/:id` need no key and serve exactly one job (`DEMO_JOB_ID`); a decision from any other job returns 404 (tested).
+- The demo approver's key and wallet sit on the server, but the wallet is an approver only on the demo job in the vault, so it can't approve anything else even if leaked.
+
 ## Alerts and automatic runs
 
 - Webhook URLs are the owner's own, but the worker fetches them, so they go through the same SSRF guard as sellers (no private addresses, no redirects, 5-second timeout). Every POST carries an HMAC-SHA256 signature over the timestamp and body.

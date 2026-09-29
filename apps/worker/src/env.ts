@@ -31,6 +31,16 @@ const schema = z.object({
   BURSAR_API_URL: z.string().url().default("http://127.0.0.1:8787"),
   /** "false" turns off automatic operator runs even when a model key is set. */
   AUTOPILOT: z.enum(["true", "false"]).default("true"),
+  /** The public demo job: its brief rotates, and its approvals are signed by a demo approver. */
+  DEMO_JOB_ID: z.string().uuid().optional(),
+  DEMO_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .min(60_000)
+    .default(3 * 3600_000),
+  /** The demo approver's Bursar key (bsr_apr_…) and wallet; both needed to auto-approve. */
+  DEMO_APPROVER_KEY: z.string().min(1).optional(),
+  DEMO_APPROVER_PRIVATE_KEY: privateKey.optional(),
   WORKER_TICK_MS: z.coerce.number().int().min(250).default(2000),
   /** How often to sweep leftover dust out of idle job wallets. */
   WORKER_SWEEP_INTERVAL_MS: z.coerce.number().int().min(1000).default(300_000),

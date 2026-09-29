@@ -37,6 +37,8 @@ export interface SpendInput {
   readonly payment?: { readonly url: string; readonly quote: unknown } | undefined;
   /** For invoices: the vendor's reference (invoice number). */
   readonly invoiceRef?: string | undefined;
+  /** For purchases: the exact URL asked for. */
+  readonly resourceUrl?: string | undefined;
 }
 
 type DecisionRow = typeof decisions.$inferSelect;
@@ -167,6 +169,7 @@ export async function requestSpend(
         amount: input.amount,
         category,
         invoiceRef: input.invoiceRef ?? null,
+        resourceUrl: input.resourceUrl ?? input.payment?.url ?? null,
         reasoning: input.reasoning,
         result: outcome.outcome,
         reason: outcome.outcome === "DENIED" ? outcome.reason : null,

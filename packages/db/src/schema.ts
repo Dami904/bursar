@@ -261,6 +261,11 @@ export const decisions = pgTable(
     category: text("category"),
     /** For invoices: the vendor's own reference (invoice number), shown in the evidence. */
     invoiceRef: text("invoice_ref"),
+    /**
+     * For purchases: the exact resource asked for (the payee is only its origin). Kept even when
+     * the request is blocked. Not part of the audit payload, so existing entries still verify.
+     */
+    resourceUrl: text("resource_url"),
     reasoning: text("reasoning").notNull(),
     result: decisionResultEnum("result").notNull(),
     reason: text("reason"),

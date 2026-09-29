@@ -1,4 +1,4 @@
-import { agents, createDb, credentials, hashKey, jobs, type Db } from "@bursar/db";
+import { agents, createDb, credentials, decisions, hashKey, jobs, type Db } from "@bursar/db";
 import { parseUsdc } from "@bursar/money";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -152,5 +152,31 @@ describe("autopilot", () => {
     fake.finish();
     await settle();
     expect(retries.has(job.id)).toBe(false);
+  });
+
+  it("tells each run what earlier runs already bought, so it doesn't repeat itself", async () => {
+    const job = await liveJob();
+    const [agent] = await db
+      .insert(agents)
+      .values({ jobId: job.id, name: "Operator", role: "operator" })
+      .returning();
+    await db.insert(decisions).values({
+      jobId: job.id,
+      agentId: agent!.id,
+      operationId: "op-history-01",
+      kind: "PURCHASE",
+      payee: "https://seller.example",
+      amount: 20_000n,
+      reasoning: "script line",
+      result: "ALLOWED",
+      checks: [],
+      remainingAtDecision: 980_000n,
+    });
+    const fake = fakeRuns();
+    await autopilotOnce({ ...fake.deps, db });
+    expect(fake.requests[0]!.brief).toContain("What earlier runs on this job already did");
+    expect(fake.requests[0]!.brief).toContain("https://seller.example, 0.02 USDC");
+    fake.finish();
+    await settle();
   });
 });

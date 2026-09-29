@@ -1,0 +1,53 @@
+Bursar is young. Here is what it doesn't do yet, or does with caveats, so you can decide with the full picture. The developer version, updated as the build goes, is [LIMITATIONS.md](https://github.com/Dami904/bursar/blob/main/docs/LIMITATIONS.md).
+
+## Network and money
+
+- **Arc testnet and USDC only.** No mainnet, other chains or other tokens yet. Testnet USDC has no real value.
+- **The x402 seller in the demo uses Circle's keyless trial facilitator**, which has a per-address allowance.
+
+## Console
+
+- **Some settings are API-only.** Per-agent limits for agents you create, spending categories, a per-payment cap or spending window tighter than the budget, turning off helpers, and adding approvers other than yourself are all available through the API but not yet in the console.
+- **Adding another approver takes two steps**: registering them in Bursar, and allowing their wallet in the vault from yours.
+- **Replacing an agent from the console keeps its name**; there's no rename yet.
+- **A job can be closed only when nothing is held, waiting or stuck.** Decide pending approvals first, and let stuck payments resolve.
+
+## Wallets and approvals
+
+- **Ordinary wallets only** (EOAs) for signing in and approving. The vault itself accepts smart-contract wallets (ERC-1271), but Bursar's API doesn't verify their signatures yet.
+
+## Payments
+
+- **Refunds wait for the payment to expire.** When a seller doesn't confirm a payment, Bursar waits until the signed payment has expired by chain time (often a few minutes, set by the seller) before refunding, because until then it could still be settled. The money stays counted against the budget meanwhile.
+- **Tiny leftovers stay in payment wallets.** Leftovers of at least 0.01 USDC are swept back; smaller dust isn't worth the fee.
+- **Sellers without a catalog** (`/.well-known/x402`) can be paid, but an agent can only buy from them if it knows the URL.
+- **Revenue is any deposit not from the owner's wallet.** There's no customer record or invoice behind it.
+- **Invoices are a reference and an amount.** No invoice file is stored, and delivery isn't verified. That's the agent's and approver's judgement.
+
+## Agents and limits
+
+- **Agents aren't on-chain identities.** Per-agent rules (revoking one agent, per-agent limits, categories) are enforced by Bursar's API; the vault enforces the job-wide envelope (budget, deposits, cap, payees, window, expiry, approvals).
+- **Sibling helpers' limits can add up to more than their parent's.** Each payment is checked against every limit above it, so together they still can't spend more than the parent's limit.
+- **A replaced agent's refunds don't pass to its replacement.** If an old payment is refunded later, that headroom returns to the old (revoked) agent. This errs on the side of spending less.
+
+## Bursar's own AI operator
+
+- **Its judgement is only as good as its model.** In testing it resisted prompt injection, but sometimes followed a misleading brief into a pointless small purchase. Bursar's limits capped the cost; they don't make choices wise.
+- **Automatic runs depend on the model being available.** On an outage it tries a fallback model, then retries with backoff. A job whose runs keep failing waits for you.
+- **One automatic run at a time** across all jobs, to stay within free-tier model limits.
+
+## Alerts
+
+- **Each alert is queued once.** An alert raised while you had no alert targets isn't re-sent after you add one. Delivery stops after 8 attempts.
+
+## Audit log
+
+- **Only anchored history is fixed**: up to ten minutes of the newest entries could in principle be rewritten before the next anchor.
+- **One chain for the whole deployment**, with each owner seeing only their own jobs' payloads.
+
+## By design
+
+- **The contracts can't be upgraded**, and the operator address is fixed. If the operator key ever leaked, jobs would be paused and closed (returning funds to owners) and a new vault deployed.
+- **Refund accounting trusts the operator to name the right payment.** The vault checks the money really arrived and never credits more than was released, but can't tell which failed payment returned money came from.
+- **No API rate limiting yet**, beyond each job's own spending window.
+- **The public demo job is public on purpose**: its decisions, reasoning and evidence are open at [/demo](/demo), and its large payments are approved automatically by a demo approver that can approve nothing else.

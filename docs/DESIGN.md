@@ -27,6 +27,22 @@ It's simple enough to hold up as a 16 px favicon.
 - Status words are plain: **Paid** (settled), **Held** (reserved), **Needs you** (awaiting
   approval), **Stuck** (unresolved), **Blocked** (denied). The ledger names stay in the API.
 
+## Landing page: draw people in
+
+The console stays calm; the landing page is allowed to move. It's still Graphite and gold, with
+more energy:
+
+- A hero whose headline animates in ("a budget" underlined in gold, "your wallet" struck out),
+  beside a looping product shot: decisions arrive, an approval gets signed, and the log is sealed
+  on Arc.
+- A ticker of decisions; an overspend demo (three agents, one budget) that plays when scrolled to;
+  a prompt-injection message that types itself and gets stamped BLOCKED; three steps joined by a
+  gold line; live numbers that count up.
+- A soft gold glow and a faint ledger grid behind the hero and the closing banner. That's the only
+  place gradients and glows are used.
+- A standard footer, with "Bursar" huge in the background as a watermark fading off the bottom.
+- Every animation switches off under `prefers-reduced-motion`.
+
 ## Tokens
 
 | Token          | Light     | Dark      | Use                                 |
@@ -66,5 +82,5 @@ Every pill also carries its text label, so colour is never the only signal.
 - Follow the device's light or dark setting, with a manual toggle in settings.
 - One primary (black or white) button per view; everything else is secondary (outlined).
 - Gold appears only in the logo seal and "anchored on Arc" badges, never on buttons or data.
-- No gradients, shadows or 3D. The landing page has one SVG/CSS animation.
+- In the console: no gradients, shadows or 3D. The landing page is the exception (see above).
 - Money is shown in USDC to 2 decimals (4 for sub-cent amounts).

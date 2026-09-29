@@ -1,4 +1,4 @@
-import { alerts } from "@bursar/db";
+import { alertTargets, alerts } from "@bursar/db";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { db, seedJob } from "./support.js";
@@ -85,5 +85,12 @@ describe("alert settings", () => {
   it("agents can't touch alert settings", async () => {
     const { agents } = await seedJob();
     expect((await call(without, "GET", "/alerts", agents[0]!.key)).status).toBe(403);
+  });
+
+  it("allows one Telegram chat per account", async () => {
+    const { ownerKey, owner } = await seedJob();
+    await db.insert(alertTargets).values({ ownerId: owner.id, kind: "TELEGRAM", chatId: "42" });
+    const again = await call(withTelegram, "POST", "/alerts/telegram", ownerKey);
+    expect(again.status).toBe(409);
   });
 });

@@ -2,8 +2,17 @@ import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
+import { JobMenu, JobStatusCard } from "../components/JobActions.js";
 import { AgentsSection, BriefSection, displayName, PayeesSection } from "../components/JobSetup.js";
-import { BudgetBar, Button, Card, ErrorLine, Initial, Loading, Status } from "../components/ui.js";
+import {
+  BudgetBar,
+  Button,
+  Card,
+  ErrorLine,
+  AgentMark,
+  Loading,
+  Status,
+} from "../components/ui.js";
 import {
   api,
   type Agent,
@@ -43,11 +52,12 @@ export function Job() {
   const j = job.data;
   const waiting = approvals.data?.pending.filter((p) => p.jobId === id) ?? [];
   const profit = Number(j.profit);
+  const closed = j.status === "CLOSED";
 
   return (
     <main>
-      <div className="mb-8 flex items-center justify-between gap-3">
-        <h1 className="text-xl font-medium">{j.title}</h1>
+      <div className="mb-8 flex items-center gap-3">
+        <h1 className="mr-auto text-xl font-medium">{j.title}</h1>
         {anchor.data?.latestAnchor && anchor.data.ok && (
           <a
             href={
@@ -61,23 +71,21 @@ export function Job() {
             {anchor.data.latestAnchor.anchorSeq}
           </a>
         )}
+        <JobMenu job={j} />
       </div>
 
-      {j.frozenReason !== null && (
-        <Card className="mb-6 border-blocked text-sm">
-          <p className="font-medium text-blocked">Frozen</p>
-          <p className="mt-1 text-muted">{j.frozenReason}</p>
-        </Card>
-      )}
+      <JobStatusCard job={j} />
 
-      <p className="text-xs text-muted">Left</p>
+      <p className="text-xs text-muted">{closed ? "Spent" : "Left"}</p>
       <div className="flex flex-wrap items-baseline gap-x-3">
-        <span className="text-4xl font-medium tracking-tight">{money(j.remaining)}</span>
+        <span className="text-4xl font-medium tracking-tight">
+          {money(closed ? j.settled : j.remaining)}
+        </span>
         <span className="text-muted">of {money(j.budget)} USDC</span>
         {Number(j.revenueReceived) > 0 && (
           <span className={`ml-auto text-sm ${profit >= 0 ? "text-paid" : "text-blocked"}`}>
             {profit >= 0 ? "+" : ""}
-            {j.profit} profit
+            {profit.toFixed(2)} profit
           </span>
         )}
       </div>
@@ -89,7 +97,7 @@ export function Job() {
         <ApprovalCard key={p.authorizationId} pending={p} />
       ))}
 
-      <div className="mt-8 grid gap-8 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+      <div className="mt-8 grid grid-cols-[minmax(0,1fr)] gap-8 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <section>
           <h2 className="mb-2 text-xs text-muted">Decisions</h2>
           {decisions.isPending && <Loading />}
@@ -105,15 +113,17 @@ export function Job() {
         <div className="space-y-8">
           <section>
             <h2 className="mb-2 text-xs text-muted">Agents</h2>
-            <AgentsSection jobId={j.id} agents={agents.data?.agents ?? []} />
+            <AgentsSection jobId={j.id} agents={agents.data?.agents ?? []} readOnly={closed} />
           </section>
-          <section>
-            <h2 className="mb-2 text-xs text-muted">Operator brief</h2>
-            <BriefSection job={j} />
-          </section>
+          {!closed && (
+            <section>
+              <h2 className="mb-2 text-xs text-muted">Operator brief</h2>
+              <BriefSection job={j} />
+            </section>
+          )}
           <section>
             <h2 className="mb-2 text-xs text-muted">Who can be paid</h2>
-            <PayeesSection job={j} />
+            <PayeesSection job={j} readOnly={closed} />
           </section>
         </div>
       </div>
@@ -146,14 +156,21 @@ export function ApprovalCard({ pending }: { pending: PendingApproval }) {
   );
 }
 
-function DecisionRow({ d }: { d: Decision }) {
+export function DecisionRow({
+  d,
+  evidenceBase = "/app/decisions",
+}: {
+  d: Decision;
+  /** Where the evidence link points: the console, or the public demo. */
+  evidenceBase?: string;
+}) {
   const [open, setOpen] = useState(false);
   const status = statusOf(d);
   return (
     <div className="border-t border-line">
       <button className="w-full py-3 text-left" onClick={() => setOpen(!open)} aria-expanded={open}>
         <div className="flex items-center gap-3">
-          <Initial name={displayName(d.agent.name)} />
+          <AgentMark id={d.agent.id} name={displayName(d.agent.name)} />
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm">{whatFor(d)}</p>
             <p className="truncate text-xs text-muted">
@@ -179,7 +196,7 @@ function DecisionRow({ d }: { d: Decision }) {
         <div className="mb-3 ml-9 space-y-2">
           <p className="font-voice italic">"{d.reasoning}"</p>
           <div className="flex gap-4 text-xs text-muted">
-            <Link to={`/app/decisions/${d.id}`} className="underline">
+            <Link to={`${evidenceBase}/${d.id}`} className="underline">
               Evidence
             </Link>
             {d.paymentTx !== null && (

@@ -8,6 +8,7 @@ import type { WorkerEnv } from "./env.js";
 import { deliverAlerts, pollTelegram, produceAlerts } from "./alerts.js";
 import { anchorOnce } from "./anchor.js";
 import { autopilotOnce } from "./autopilot.js";
+import { approveDemoPayments, rotateDemoBrief } from "./demo.js";
 import { executeOnce } from "./executor.js";
 import { indexOnce } from "./indexer.js";
 import { log } from "./log.js";
@@ -97,6 +98,26 @@ export async function startWorker(env: WorkerEnv): Promise<RunningWorker | null>
       : null;
   if (autopilot === null) log.info("autopilot off (no model key, or AUTOPILOT=false)");
 
+  const demo =
+    env.DEMO_JOB_ID === undefined || autopilot === null
+      ? null
+      : {
+          db,
+          jobId: env.DEMO_JOB_ID,
+          intervalMs: env.DEMO_INTERVAL_MS,
+          running: autopilot.running,
+          ...(env.DEMO_APPROVER_KEY && env.DEMO_APPROVER_PRIVATE_KEY
+            ? {
+                approver: {
+                  apiUrl: env.BURSAR_API_URL,
+                  key: env.DEMO_APPROVER_KEY,
+                  privateKey: env.DEMO_APPROVER_PRIVATE_KEY,
+                  afterMs: 60_000,
+                },
+              }
+            : {}),
+        };
+
   let running = true;
   const loop = (async () => {
     log.info("worker started", { operator: operator.account.address, vault, chainId: chain.id });
@@ -164,6 +185,14 @@ export async function startWorker(env: WorkerEnv): Promise<RunningWorker | null>
         await deliverAlerts(alertDeps);
       } catch (error) {
         log.error("alerts tick failed", error);
+      }
+      if (demo !== null) {
+        try {
+          await rotateDemoBrief(demo);
+          await approveDemoPayments(demo);
+        } catch (error) {
+          log.error("demo tick failed", error);
+        }
       }
       if (autopilot !== null) {
         try {

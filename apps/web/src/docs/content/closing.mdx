@@ -1,0 +1,44 @@
+You're always one wallet confirmation away from stopping a job, and one more from having its money back. This guide covers pausing, resuming, closing, expiry, and what happens to money from failed payments.
+
+All of these are in the job page's **⋯** menu. Each runs from **your wallet**, on the vault itself, so none of it depends on Bursar's server behaving.
+
+## Pause
+
+**Pause job** stops every payment at once. The vault refuses all releases while a job is paused, whatever Bursar's server asks, so nothing leaves until you resume it. Agents' requests are refused with `JOB_NOT_ACTIVE`.
+
+Use it when an agent is doing something you don't understand, when a key may have leaked, or just to think.
+
+- Payments already sent before the pause finish normally.
+- Bursar's server can pause a job too, in an emergency. It does this automatically when it sees an unexplained payout. It can never resume one: only the owner can.
+
+## Resume
+
+**Resume job** lets payments flow again, under the same rules.
+
+Pausing and resuming both count as a change of rules on-chain, so any approval signed **before** a pause is void afterwards. Payments that were waiting for approval need approving again.
+
+## Close and get the money back
+
+**Close job** ends the job for good and returns every unspent USDC to your wallet in the same transaction. The menu shows the exact amount: "Close and return 0.57 USDC".
+
+The console lets you close only when nothing is **held, waiting or stuck**:
+
+- **Waiting for approval**: approve or reject those payments first.
+- **Held** (being paid right now): wait a few seconds for them to finish.
+- **Stuck**: wait until Bursar settles them or refunds them (see below).
+
+This makes sure every payment is accounted for before the books close. After closing, the job is read-only: its history, evidence and audit trail stay available, but no more agents, keys or payments.
+
+## When a job expires
+
+At the expiry date the job stops paying anyone. Bursar refuses with `JOB_EXPIRED`, and the vault refuses too, by chain time. The money stays in the vault until you close the job; nothing is returned automatically. Close it from the menu as above.
+
+## Money from failed payments
+
+Sometimes the vault has released money for a purchase but the seller never settles it: the seller is down, refuses the payment, or answers too late. Bursar doesn't guess. It waits until the signed payment has **expired by chain time** (so it can no longer be settled), then sends the money back from the job's payment wallet to the vault and credits the job. The budget bar shows these as **stuck** until they're resolved. You get an alert if one takes longer than 5 minutes.
+
+Every refund is checked on-chain: the vault only credits USDC that has actually arrived, never more than was released for that payment, and never twice.
+
+## Frozen jobs
+
+If the vault ever pays out money that Bursar can't match to one of the job's payments, for example because someone used a leaked server key outside Bursar, the job is **frozen** at once, paused on-chain, and you get an alert. Check the job's transactions on the explorer. Once you're satisfied, choose **Unfreeze**: it clears the freeze in Bursar and resumes the job on-chain from your wallet. See [Security model](/docs/security).

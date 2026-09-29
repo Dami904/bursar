@@ -1,0 +1,62 @@
+A job is where the money and the rules live. This guide walks through creating one in the console, what each setting does, and what happens on Arc when you fund it.
+
+## Before you start
+
+- A browser wallet that can connect to Arc testnet (chain id `5042002`), through the browser extension or WalletConnect.
+- Enough testnet USDC for the budget, plus a few cents for fees. On Arc, gas is paid in USDC.
+- Sign in to the [console](/login). Sign-in is Sign-In with Ethereum: you sign a one-time message, no transaction and no fee. The session lasts 24 hours, or until you sign out.
+
+## Step 1: the details
+
+| Field | What to enter | Why it matters |
+|---|---|---|
+| **Title** | A short name, like "Explainer film". | How the job appears in your list, alerts and Telegram messages. |
+| **Customer** (optional) | Who the work is for. | For your own records and the job page header. |
+| **Budget** | The total the job may spend, in USDC. | The hard ceiling for every agent on the job together. Your wallet deposits exactly this amount. |
+| **Ask me above** | An amount in USDC. | Payments strictly larger than this wait for your approval. `0` means you approve every payment; the budget means you approve none. |
+| **Ends in** | A number of days. | When the job expires. After that, nothing more is paid, and you can close it to get the rest back. |
+| **What should the agent do?** (optional) | A plain-language brief. | If set, Bursar's own AI operator starts working on the job as soon as it's live. Leave it empty to use your own agents. |
+
+The console sets two more rules for you. The **per-payment cap** equals the budget, so any single payment the budget allows is fine. The **spending window** lets the whole budget be spent within an hour. Both are still checked on-chain. Through the API you can set them tighter, for example a cap of 0.50 USDC per payment, or at most 1 USDC an hour.
+
+## Step 2: who can be paid
+
+Add each payee as a web origin or a wallet address, with an optional label:
+
+- **An x402 seller**: its origin, like `https://api.seller.com`. Only the scheme, host and port count; any path on that origin is allowed. If the seller publishes a catalog at `/.well-known/x402`, your agents see its products through `list_sellers`, and get each price with `quote`.
+- **A wallet**: a `0x…` address, for paying invoices to a vendor or contractor.
+
+You can add more payees later from the job page. Anything not on the list is refused with `PAYEE_NOT_ALLOWED` before Bursar contacts it at all: Bursar never fetches a URL for an agent unless you allowed its origin.
+
+## Step 3: fund it on Arc
+
+The last step runs from your wallet. Each line is one confirmation, and any step that fails (a closed wallet, a dropped connection) can be retried.
+
+1. **Create the job**: Bursar records the job and creates the job's payment wallet (a Circle wallet that only ever holds money for payments in flight).
+2. **Open it in the vault**: your wallet calls `createJob` on JobVault with the job's rules. From now on you are the job's owner on-chain, and only you can change its rules.
+3. **Allow the deposit**: a standard USDC approval, so the vault can take the budget from your wallet.
+4. **Deposit the budget**: the vault takes exactly the budget amount.
+5. **Let your wallet approve payments**: registers your wallet as the job's approver in the vault, so your approvals are accepted on-chain.
+6. **Allow each vendor wallet**: for every wallet payee, the vault's own allow-list is updated too. x402 sellers don't need this step: purchases go through the job's payment wallet, which the vault always allows.
+7. **Waiting for Arc**: Bursar's indexer sees the job open and funded on-chain, and marks it **active**.
+
+<Callout type="warn">
+
+Wallet payees must be allowed in two places: in Bursar and in the vault. The wizard does both. If you add a vendor wallet later from the job page, press its **Allow in vault** button, or the vault will refuse to pay it even if Bursar allows it.
+
+</Callout>
+
+## Spending categories
+
+Categories let you split the budget by kind of spending. Give payees a category (like `images` or `contractors`) and set a limit for that category. A payment that would take the category past its limit is refused with `CATEGORY_BUDGET_EXCEEDED`, even if the job has money left. Categories are set through the API today (`POST /jobs/:id/payees` with a `category`, then `POST /jobs/:id/category-limits`); they are not in the console yet.
+
+## Revenue
+
+If your customer pays into the job's vault, Bursar counts it as **revenue**: any deposit that doesn't come from the owner's wallet. The job page then shows money in, money out and profit, including what the AI operator's model calls cost. Revenue is tracked for reporting; it doesn't raise the budget.
+
+## After it's live
+
+- The job page shows the budget bar, every decision as it happens, the agents, and who can be paid.
+- Add agents and give them keys: [Agents, helpers and replacements](/docs/agents).
+- Get told when something needs you: [Alerts and Telegram](/docs/alerts).
+- When the work is done: [Pause, close and get money back](/docs/closing).

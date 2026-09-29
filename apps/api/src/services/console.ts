@@ -73,7 +73,7 @@ export async function jobDecisions(db: Db, ownerId: string, jobId: string, limit
     state: auth?.state ?? null,
     authorizationId: auth?.id ?? null,
     /** For purchases: the exact resource bought (the payee is only its origin). */
-    paymentUrl: auth?.paymentUrl ?? null,
+    paymentUrl: auth?.paymentUrl ?? d.resourceUrl ?? null,
     paymentTx: auth?.paymentTx ?? null,
   }));
 }

@@ -1,0 +1,62 @@
+Bursar has a small vocabulary. Once these ideas click, the rest of the docs is detail.
+
+## Jobs
+
+A **job** is one piece of work with its own money: "make a 60-second explainer film", "research this market", "run this month's newsletter". Everything in Bursar hangs off a job: its budget, its agents, who it may pay, and its history.
+
+A job has these rules. The owner sets them when the job is created, and only the owner can change them.
+
+| Rule | What it means |
+|---|---|
+| **Budget** | The most the job can ever spend, in USDC. Every agent on the job shares it. |
+| **Per-payment cap** | The largest single payment allowed. |
+| **Approval threshold** | Payments strictly above this wait for a human signature. |
+| **Spending window** | At most a set amount per rolling period (an hour by default), so even a runaway agent spends slowly. |
+| **Expiry** | After this moment the job pays no one. |
+| **Payees** | The allow-list: who the job may pay. Everyone else is refused. |
+| **Categories** (optional) | Labels on payees (say `images` or `contractors`) with their own smaller budgets. |
+
+A job is **active** while it can spend, **paused** when the owner (or Bursar, if something looks wrong) stops it, and **closed** once it's ended and the unspent money has gone back to the owner.
+
+## Agents
+
+An **agent** is anything that spends on a job's behalf: your Claude Code session, a script, Bursar's own AI operator. Each agent has its own **key** (`bsr_agt_…`), and a key only ever works for its own job. Agents never hold a wallet or a private key; they ask Bursar to pay.
+
+An agent can have its **own limit**, a share of the job budget it can't go past. An agent can also start **helpers** (sub-agents) for part of its work. A helper's limit is carved out of its parent's, never added to it, so delegating can't create money. Revoking an agent revokes every helper below it at once. See [Agents, helpers and replacements](/docs/agents).
+
+## Payees
+
+A **payee** is someone the job may pay. There are two kinds:
+
+- **x402 sellers**, named by their web origin (`https://api.seller.com`). Agents *buy* from them: Bursar gets a price quote, pays in USDC and returns what was bought. [x402](https://www.x402.org) is an open protocol where a server answers `402 Payment Required` with a price, and the client pays per request.
+- **Wallets**, named by their `0x…` address: a vendor, a freelancer, another business. Agents *pay invoices* to them straight from the job's funds. See [Paying invoices](/docs/invoices).
+
+## Decisions
+
+Every time an agent asks to pay, Bursar makes a **decision**, in one of three ways:
+
+- **Allowed**: every rule passed and the amount is at or below the approval threshold. The money is reserved and the payment goes ahead.
+- **Needs approval**: every rule passed, but the amount is above the threshold. The money is held for it while a person decides.
+- **Denied**: a rule failed. Nothing is reserved or paid, and the agent gets the reason as a [refusal code](/docs/refusal-codes).
+
+Each decision stores the agent's **reasoning** (why it wants to pay), the result of every check, and the budget left at that moment. The owner sees all of it on the job page. That is often the fastest way to tell whether an agent is doing its job or going off the rails.
+
+## Reservations and the shared budget
+
+When several agents share a budget, the hard part is two of them asking at the same instant, each seeing enough money, and both spending it. Bursar prevents this by **reserving**. A decision and its reservation happen in one database transaction, one job at a time, so the second agent sees the first one's reservation and is refused if the money isn't there. Reserved money counts as spent until the payment settles or is refunded.
+
+The job page's budget bar shows this: settled, held (reserved or being paid), waiting for approval, stuck, and left.
+
+## Approvals
+
+A payment above the threshold waits for someone the owner has made an **approver**. By default that's the owner's own wallet. Approving means signing a message with that wallet. The vault on Arc checks that signature itself, so an approval can't be forged by our server. Unanswered approvals are rejected after two hours. See [Approvals](/docs/approvals).
+
+## The vault
+
+The job's USDC doesn't sit in a Bursar account. It sits in **JobVault**, a smart contract on Arc. The vault holds the job's rules too (budget, per-payment cap, payees, window, expiry, approvers) and checks them again on every release. So even if Bursar's server were compromised, it could only move money the way the job's rules allow, and the owner could pause the job from their wallet at once. See [Security model](/docs/security).
+
+When a purchase is paid, the vault releases exactly that amount to the job's own payment wallet, which pays the seller straight away. An invoice is paid straight from the vault to the vendor.
+
+## The audit log
+
+Every decision and every change of state after it goes into an append-only, **hash-chained log**: each entry includes a hash of the one before, so changing any past entry breaks every hash after it. Every ten minutes (or 50 entries) the newest hash is written to Arc. Anyone can re-compute the chain and compare it with what's on-chain. See [Audit log and anchoring](/docs/audit-log).

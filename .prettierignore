@@ -4,3 +4,4 @@ dist/
 coverage/
 contracts/lib/
 contracts/out/
+apps/web/src/docs/content/

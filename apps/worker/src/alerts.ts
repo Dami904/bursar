@@ -322,10 +322,15 @@ export async function pollTelegram(deps: AlertDeps): Promise<number> {
         )
         .returning();
       if (link !== undefined) {
-        await db
-          .insert(alertTargets)
-          .values({ ownerId: link.ownerId, kind: "TELEGRAM", chatId: String(chatId) })
-          .onConflictDoNothing();
+        // One chat per account: a newer link replaces the old chat instead of adding a second.
+        await db.transaction(async (tx) => {
+          await tx
+            .delete(alertTargets)
+            .where(and(eq(alertTargets.ownerId, link.ownerId), eq(alertTargets.kind, "TELEGRAM")));
+          await tx
+            .insert(alertTargets)
+            .values({ ownerId: link.ownerId, kind: "TELEGRAM", chatId: String(chatId) });
+        });
         linked += 1;
       }
       await telegram(deps, "sendMessage", {

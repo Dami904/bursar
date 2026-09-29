@@ -1,0 +1,102 @@
+Each [alert](/docs/alerts) is sent to your webhook as a JSON `POST`, signed with the secret you were shown when you added it. This page is the exact format, and how to check a request really came from Bursar.
+
+## The request
+
+```http
+POST /your/endpoint HTTP/1.1
+content-type: application/json
+x-bursar-event: needs_approval
+x-bursar-timestamp: 1759092459
+x-bursar-signature: sha256=5d41402abc4b2a76b9719d911017c592…
+
+{"id":"7247cc4d-80a8-4d27-a501-e3c426cfe2ba","type":"needs_approval","title":"0.15 USDC needs your approval","body":"Short film: Money for machines: \"The closing scene needs numbers…\"","link":"https://<console>/app/approvals","jobId":"9d1ebd18-d21c-4e15-9940-9796ba27d572","createdAt":"2026-09-28T21:07:39.000Z"}
+```
+
+### Headers
+
+| Header | |
+|---|---|
+| `x-bursar-event` | The alert type, the same as `type` in the body. |
+| `x-bursar-timestamp` | When this attempt was sent, in Unix seconds. |
+| `x-bursar-signature` | `sha256=` followed by the hex HMAC-SHA256 of `<timestamp>.<body>`, keyed with your signing secret. |
+
+### Body
+
+| Field | Type | |
+|---|---|---|
+| `id` | string | The alert's id. The same on every retry: use it to ignore duplicates. |
+| `type` | string | One of the types below. |
+| `title` | string | One line, ready to show a person. |
+| `body` | string | A sentence or two of detail. |
+| `link` | string or null | Where to act in the console. |
+| `jobId` | string or null | The job it's about (`null` for test alerts). |
+| `createdAt` | string | When the event happened (ISO 8601). |
+
+### Types
+
+| `type` | Sent when |
+|---|---|
+| `needs_approval` | A payment is waiting for approval. |
+| `stuck_payment` | A payment has been unresolved for more than 5 minutes. |
+| `budget_80` | A job has committed 80% of its budget. |
+| `job_frozen` | A job was frozen after an unexplained payout. |
+| `denial_burst` | 3 or more requests were denied on one job within 10 minutes. |
+| `test` | You pressed **Send a test alert**. |
+
+New types may be added. Ignore types you don't recognise rather than failing.
+
+## Checking the signature
+
+Always verify before trusting a webhook: anyone who finds your URL can send it requests. Compute the HMAC over the **raw** request body, exactly as received (not re-serialised JSON), and compare in constant time. Also reject old timestamps, so a captured request can't be replayed later.
+
+### Node.js
+
+```js
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+export function verifyBursar(rawBody, headers, secret, toleranceSeconds = 300) {
+  const timestamp = headers["x-bursar-timestamp"];
+  const signature = headers["x-bursar-signature"] ?? "";
+  if (!timestamp || Math.abs(Date.now() / 1000 - Number(timestamp)) > toleranceSeconds) {
+    return false;
+  }
+  const expected =
+    "sha256=" + createHmac("sha256", secret).update(`${timestamp}.${rawBody}`).digest("hex");
+  const a = Buffer.from(signature);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+```
+
+With Express, read the raw body with `express.raw({ type: "application/json" })`, verify, then `JSON.parse` it.
+
+### Python
+
+```python
+import hashlib, hmac, time
+
+def verify_bursar(raw_body: bytes, headers, secret: str, tolerance: int = 300) -> bool:
+    timestamp = headers.get("x-bursar-timestamp", "")
+    signature = headers.get("x-bursar-signature", "")
+    if not timestamp or abs(time.time() - int(timestamp)) > tolerance:
+        return False
+    message = timestamp.encode() + b"." + raw_body
+    expected = "sha256=" + hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(signature, expected)
+```
+
+## Answering
+
+Return any `2xx` status within **5 seconds** to confirm delivery. Do slow work (paging someone, calling another service) after answering, or in a queue.
+
+Anything else (a `4xx` or `5xx`, a timeout, a redirect) counts as a failure, and the alert is retried after 1 minute, then 2, 4, 8… (at most an hour apart), up to 8 attempts. An alert is retried for **all** of your targets until every one succeeds, so the same alert can reach you more than once: de-duplicate on `id`.
+
+## Rules for the URL
+
+Bursar fetches your URL from its own servers, so it applies the same protections as for sellers:
+
+- It must resolve to a **public** address. Private, local and link-local addresses are refused.
+- Redirects are not followed.
+- The request times out after 5 seconds.
+
+The signing secret is shown only once. If you lose it, remove the webhook and add it again to get a new one.

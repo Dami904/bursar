@@ -1,0 +1,79 @@
+Every agent that spends on a job gets its own identity and key. This guide covers giving agents keys, per-agent limits, helpers (agents started by other agents), and what to do when an agent misbehaves.
+
+## Adding an agent
+
+On the job page, under **Agents**, type a name and add it. Bursar shows the new key once, with ready-made connection snippets. The key:
+
+- starts with `bsr_agt_` and works only for this job;
+- is stored by Bursar only as a SHA-256 hash, so a leaked database doesn't leak usable keys;
+- can spend within the job's rules and the agent's own limit, and do nothing else. It can't change rules, add payees, approve payments or see other jobs.
+
+Give each agent (or each running copy of your agent) its own key. Separate keys mean separate decisions on the job page, separate limits, and the ability to switch off one agent without touching the others.
+
+## Per-agent limits
+
+An agent can have a **limit**: the most it, together with every helper below it, may commit from the job's budget. Hitting it gets a refusal with `AGENT_LIMIT_EXCEEDED`, even if the job has money left.
+
+The console adds agents without a limit of their own, so the job's rules apply to them. To give an agent a limit, create it through the API with `spendLimit`. `$OWNER_KEY` is the 24-hour session key you get by signing in with your wallet; see [HTTP API → Owner access](/docs/http-api#owner-access).
+
+```bash
+curl -X POST $BURSAR_API_URL/jobs/$JOB_ID/agents \
+  -H "authorization: Bearer $OWNER_KEY" \
+  -H "content-type: application/json" \
+  -d '{"name":"Researcher","role":"research","spendLimit":"0.50"}'
+```
+
+## Helpers (sub-agents)
+
+A job's agents can start **helpers** for part of their work: a researcher, a translator, a price checker. A helper is a full agent with its own key and decisions, placed under the agent that started it. On the job page it appears indented under its parent, marked with ↳.
+
+An agent starts a helper through the API (Bursar's own operator does this with its `spawn_helper` tool):
+
+```bash
+curl -X POST $BURSAR_API_URL/spend/subagent \
+  -H "authorization: Bearer $AGENT_KEY" \
+  -H "content-type: application/json" \
+  -d '{"name":"helper: prices","role":"price research","spendLimit":"0.05"}'
+```
+
+The response contains the helper's agent record and its key, shown once.
+
+### How helper limits work
+
+The rule is simple: **delegating never creates money**.
+
+- A helper's limit is carved out of its parent's, never added to it. If the parent (or any agent above it) has a limit, the helper **must** be given one, and it must fit inside what's left of the tightest limit above it.
+- Everything a helper spends also counts against its parent's limit, its grandparent's, and so on up the tree. A payment is refused with `AGENT_LIMIT_EXCEEDED` if it would break *any* of those limits.
+- Two helpers of the same parent can each have limits that add up to more than the parent's. That's allowed, because every payment is checked against the parent too: together they still can't spend more than the parent's limit.
+- The whole tree also shares the job's budget, per-payment cap and payee list, like any agent.
+
+Trees can be up to 32 agents deep. The owner can turn helpers off for a job (`delegationAllowed: false` when creating it through the API). An agent that tries then gets `DELEGATION_NOT_ALLOWED`.
+
+<Callout>
+
+The MCP server deliberately doesn't offer a tool for starting helpers. A new helper's key would pass through the model's conversation, and keys belong in configuration, not in chat. Agents that need helpers can call the HTTP API from their own code.
+
+</Callout>
+
+## Revoking
+
+Revoke an agent from the job page (⋯ next to it) or with `POST /agents/:id/revoke`. In one database transaction, Bursar revokes:
+
+- the agent,
+- every helper below it, at any depth,
+- and all their keys.
+
+Anything they try afterwards gets `401 UNAUTHORIZED` or a refusal with `AGENT_REVOKED`. Payments already moving on-chain finish normally; nothing new starts. The whole team's history stays on the job page.
+
+## Replacing
+
+Sometimes an agent is stuck, confused, or its key has leaked, but the job still needs someone in that seat. **Replace** does both steps at once: it revokes the old agent and its helpers, and creates a fresh agent with a new key in the same place in the tree.
+
+- **Owners** can replace any agent on their jobs: job page → ⋯ → Replace, or `POST /agents/:id/replace`.
+- **An agent** can replace its own direct helpers: `POST /spend/subagents/:id/replace` with the helper's id.
+
+The replacement inherits only what the old agent had **left**. What the old agent (and its helpers) already spent or reserved stays counted against the old agent and every limit above it, so replacing an agent never frees up extra money. An agent can be replaced once: replacing it again returns `ALREADY_REPLACED`, so replace the replacement instead.
+
+## Bursar's own operator
+
+If a job has a brief, Bursar's AI operator works on it automatically. It appears as an agent named **Operator (auto)**. Each run gets a fresh key that's revoked when the run ends, so there's never a long-lived operator key to leak. Revoking the "Operator (auto)" agent stops automatic runs for that job.

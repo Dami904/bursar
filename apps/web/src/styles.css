@@ -80,3 +80,238 @@ body {
   outline: 2px solid var(--text);
   outline-offset: 2px;
 }
+
+/* ---------- Landing page motion (the console itself stays still) ---------- */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes strike {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+@keyframes marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-1deg);
+  }
+  50% {
+    transform: translateY(-10px) rotate(0.5deg);
+  }
+}
+@keyframes stamp {
+  0% {
+    opacity: 0;
+    transform: scale(2.4) rotate(-14deg);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(0.94) rotate(-8deg);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(-8deg);
+  }
+}
+@keyframes glow {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.08);
+  }
+}
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes coin-in {
+  0% {
+    opacity: 0;
+    transform: translateY(-60px) scale(0.6);
+  }
+  70% {
+    opacity: 1;
+    transform: translateY(4px) scale(1);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes bounce-off {
+  0% {
+    opacity: 0;
+    transform: translateY(-60px);
+  }
+  55% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(60px, -40px) rotate(40deg);
+  }
+}
+@keyframes draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes shake {
+  0%,
+  100% {
+    transform: none;
+  }
+  25% {
+    transform: translateX(-4px);
+  }
+  75% {
+    transform: translateX(4px);
+  }
+}
+
+.animate-rise {
+  animation: rise 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.animate-float {
+  animation: float 7s ease-in-out infinite;
+}
+.animate-glow {
+  animation: glow 6s ease-in-out infinite;
+}
+.animate-stamp {
+  animation: stamp 0.55s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+.animate-slide-in {
+  animation: slide-in 0.45s ease-out both;
+}
+.animate-marquee {
+  animation: marquee 40s linear infinite;
+}
+.animate-shake {
+  animation: shake 0.3s ease-in-out 2;
+}
+.caret::after {
+  content: "▍";
+  margin-left: 1px;
+  animation: blink 1s steps(1) infinite;
+}
+/* Elements that wait for their section to scroll into view. */
+.reveal {
+  opacity: 0;
+}
+.reveal.in {
+  animation: rise 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .reveal {
+    opacity: 1;
+  }
+}
+
+/* Hero background: payments flowing along lanes toward a spending limit. */
+@keyframes flow-pass {
+  0% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  92% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(1240px);
+    opacity: 0;
+  }
+}
+@keyframes flow-block {
+  0% {
+    transform: translateX(0);
+    opacity: 0;
+    fill: var(--seal);
+  }
+  8% {
+    opacity: 1;
+  }
+  70% {
+    transform: translateX(818px);
+    fill: var(--seal);
+    opacity: 1;
+  }
+  76% {
+    transform: translateX(812px);
+    fill: var(--blocked);
+    r: 7;
+  }
+  100% {
+    transform: translateX(812px);
+    fill: var(--blocked);
+    opacity: 0;
+    r: 3;
+  }
+}
+.flow-mask {
+  mask-image:
+    linear-gradient(to right, transparent 0%, rgb(0 0 0 / 0.35) 35%, black 65%),
+    linear-gradient(to bottom, transparent, black 15%, black 80%, transparent);
+  mask-composite: intersect;
+}
+
+/* A small badge landing in place: a quick scale-in, no tilt. */
+@keyframes pop {
+  0% {
+    opacity: 0;
+    transform: scale(1.8);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-pop {
+  animation: pop 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}

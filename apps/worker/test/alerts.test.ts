@@ -241,6 +241,18 @@ describe("Telegram", () => {
     });
   });
 
+  it("keeps one chat per account: a newer link replaces the old chat", async () => {
+    const { owner } = await liveJob();
+    await db.insert(alertTargets).values({ ownerId: owner.id, kind: "TELEGRAM", chatId: "111" });
+    await db.insert(telegramLinks).values({ code: "newchatcode1", ownerId: owner.id });
+    const tg = fakeTelegram([
+      { update_id: 11, message: { chat: { id: 222 }, text: "/start newchatcode1" } },
+    ]);
+    await pollTelegram(deps({ telegramToken: "t", fetch: tg.fetchFn }));
+    const targets = await db.select().from(alertTargets);
+    expect(targets).toMatchObject([{ kind: "TELEGRAM", chatId: "222" }]);
+  });
+
   it("won't reuse a link code", async () => {
     const { owner } = await liveJob();
     await db

@@ -1,0 +1,1 @@
+ALTER TABLE "decisions" ADD COLUMN "resource_url" text;

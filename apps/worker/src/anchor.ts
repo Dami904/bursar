@@ -102,6 +102,8 @@ export async function anchorOnce(deps: AnchorDeps): Promise<AnchorRow | null> {
       head: check.head,
       status: "SENT",
       txHash: hash,
+      // The worker's clock, like every age check here (the database's can run ahead of it).
+      sentAt: new Date(),
     })
     .returning();
   if (row === undefined) throw new Error("anchor insert returned nothing");
