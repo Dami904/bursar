@@ -16,10 +16,13 @@ signature Circle confirms in about a second, with no gas, and settles on Arc in 
 - **The budget counts the float once.** The demo job shows 0.005 drawn and 0.095 unspent in Gateway,
   and 1.79 left of 2.00: 0.115 paid plus the 0.095 float, which counts in full from the moment it
   leaves the vault.
-- **Withdrawing from Gateway works on Arc with Bursar's own code** (on a test wallet): the whole
-  balance came back in about 2.5 s, Circle charged its flat 0.0035 fee and marked the withdrawal
-  finalized with our mint transaction. Closed jobs now return their unspent float to the owner this
-  way.
+- **Closing a job returned its unspent float to the owner, in production.** A test job (0.20
+  budget) bought one 0.001 item, which pulled a 0.10 float into Gateway, then the owner closed it
+  ([close](https://explorer.testnet.arc.io/tx/0xec242b27608c68d2e82bf03c04f77686859e73999a2b3546ee11ef69ed3f0ad7)):
+  the vault returned its 0.10 at once, and about 30 s later the worker had the job's Circle wallet
+  sign a withdrawal of the 0.099 left in Gateway, Circle attested it (fee 0.0035), and the operator
+  minted 0.09515 USDC to the owner
+  ([mint](https://explorer.testnet.arc.io/tx/0xc8369aa26e690bda7c8fc11de3647174f77d912c1c4b1cff3ebc40e16699be61)).
 
 ## How it works
 
