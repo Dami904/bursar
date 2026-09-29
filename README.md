@@ -4,37 +4,74 @@
 
 # Bursar
 
+**Give an AI team a job and a budget, not the company wallet.**
+
+One job. One budget. Every agent. Enforced on Arc.
+
 [![CI](https://github.com/Dami904/bursar/actions/workflows/ci.yml/badge.svg)](https://github.com/Dami904/bursar/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-336%20passing-22C55E?style=flat)](https://github.com/Dami904/bursar/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-336%20passing-22C55E?style=flat)](#tested-not-claimed)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Live](https://img.shields.io/badge/live-bursarhq.vercel.app-000000?style=flat)](https://bursarhq.vercel.app)
 [![Arc testnet](https://img.shields.io/badge/Arc%20testnet-USDC-B08A2E?style=flat)](https://explorer.testnet.arc.io/address/0x5Cd51a31fE931D31574Eadd083A0B5c210CA2cB6)
 [![npm](https://img.shields.io/npm/v/bursar-mcp?label=bursar-mcp&color=1f1f23)](https://www.npmjs.com/package/bursar-mcp)
 
-### Give an AI team a job and a budget, not the company wallet.
-
-Agents get a scoped **Bursar key** instead of a wallet. Every payment they ask for is checked against the job's budget, per-payment cap, allowed payees, agent limits and approval threshold, reserved so the team can't jointly overspend, and paid in USDC from a **JobVault contract on Arc** that re-checks the same rules on-chain. Every decision, with the agent's own reasoning, is hash-chained and anchored on Arc.
-
-**[Live app ↗](https://bursarhq.vercel.app)** · **[Live demo job ↗](https://bursarhq.vercel.app/demo)** · **[Judge it in 90 seconds](#judge-it-in-90-seconds)** · **[The core proof](#the-core-proof)** · **[Docs ↗](https://bursarhq.vercel.app/docs/introduction)**
+**[Live app](https://bursarhq.vercel.app)** · **[Live demo job](https://bursarhq.vercel.app/demo)** · **[Docs](https://bursarhq.vercel.app/docs/introduction)** · **[Judge it in 90 seconds](#judge-it-in-90-seconds)** · **[Proven on Arc](#proven-on-arc)** · **[How a payment works](#how-a-payment-works)**
 
 Built for the [Tameion Agents Hackathon](https://tameion.thecanteenapp.com/) (Canteen × Circle) · RFB 04, Autonomous Business Operator.
 
 </div>
 
+<!--
+  DEMO VIDEO GOES HERE (under the header, before "The problem").
+  On GitHub: edit README.md in the browser, drag the .mp4 into this spot, and GitHub
+  inserts a https://github.com/user-attachments/assets/... link that plays inline.
+  Then add a "Watch the demo" link to the header row and, if useful, a chapter table:
+  | [0:00](url) | the problem | [0:30](url) | a live payment | ...
+-->
+
+---
+
+## The problem
+
+AI agents can already find services and pay for them on their own. Put several agents on one job and budget control becomes a distributed-systems problem: three agents each check a 1.00 budget, each see enough, and each spend 0.40. Every decision was reasonable. Together they spent 1.20.
+
+Giving each agent a wallet doesn't fix it, and neither does checking the balance. The check and the spend have to be one step, shared by every agent on the job, and enforced somewhere an agent, a seller or even a compromised server can't talk its way past.
+
+## What Bursar does
+
+Agents get a scoped **Bursar key** instead of a wallet. Every payment they ask for is checked against the job's rules and **reserved before anything is signed**, so a team can never jointly overspend:
+
+```text
+settled + held + awaiting approval + stuck  ≤  job budget         Bursar, atomically, before signing
+spent ≤ budget   and   spent ≤ deposited                          JobVault on Arc, on every release
+```
+
+The first line is held by the API under a row lock. The second is held by a smart contract that re-checks the job's rules itself and refuses to release a cent otherwise, whatever the server asks.
+
+- **One budget, many agents.** Parallel requests serialize on the job; the one that doesn't fit is denied with `JOB_BUDGET_EXCEEDED` before anything moves.
+- **Delegation never creates money.** Helpers get limits carved out of their parent's; every payment is checked against every limit up the tree. A replacement inherits only what was left.
+- **You approve the big ones.** Above your threshold, a payment waits for your wallet's EIP-712 signature, which the vault itself verifies.
+- **Retries never pay twice.** One operation id, one authorization, one release, enforced in the database and on-chain.
+- **Uncertain payments keep counting.** If the outcome is unknown, the money stays held until the chain proves it settled, or it's refunded.
+- **Evidence for everything.** Every decision carries the agent's reasoning, each check's result and its Arc transactions, in a hash-chained log anchored on Arc.
+- **Works with any agent.** `npx -y bursar-mcp` for Claude Code, Cursor or Claude Desktop, or plain HTTP.
+
+**Bursar decides. JobVault enforces. Arc settles.**
+
 ---
 
 ## Judge it in 90 seconds
 
-**Live: [bursarhq.vercel.app](https://bursarhq.vercel.app)**. Everything runs for real on Arc testnet: the website, the API and worker, the database, and a public job that Bursar's own AI operator works on around the clock. Open **[/demo](https://bursarhq.vercel.app/demo)**: every decision links to its Arc transactions, and **Verify** recomputes its audit hashes in your browser.
+**Live: [bursarhq.vercel.app](https://bursarhq.vercel.app)**. Everything runs for real on Arc testnet: the site, the API and worker, the database, and a public job that Bursar's own AI operator works on around the clock. Open **[/demo](https://bursarhq.vercel.app/demo)**: every decision links to its Arc transactions, and **Verify** recomputes its audit hashes in your browser.
 
-|         |                                                                                                                   |
-| ------- | ----------------------------------------------------------------------------------------------------------------- |
-| **336** | tests passing: 288 TypeScript across 8 packages, 48 Solidity (JobVault, AuditAnchor)                              |
-| **12**  | rules checked in a fixed order on every payment; the job-wide ones enforced again by the vault on-chain           |
-| **3**   | independent layers holding the money: API policy → JobVault on Arc → a Circle wallet funded one payment at a time |
-| **6**   | MCP tools behind one key: `npx -y bursar-mcp`                                                                     |
+|         |                                                                                                       |
+| ------- | ----------------------------------------------------------------------------------------------------- |
+| **336** | tests passing: 288 TypeScript across 8 packages, 48 Solidity                                          |
+| **12**  | rules checked in a fixed order on every payment; the job-wide ones enforced again by the vault        |
+| **3**   | layers holding the money: API policy → JobVault on Arc → a Circle wallet funded one payment at a time |
+| **6**   | MCP tools behind one key                                                                              |
 
-Connect your own agent in one command (key from the console):
+Connect your own agent (key from the console):
 
 ```bash
 claude mcp add bursar \
@@ -54,11 +91,12 @@ curl -s https://bursarhq-api.onrender.com/demo              # the public job: bu
 
 ## Contents
 
+- [Proven on Arc](#proven-on-arc)
 - [The core proof](#the-core-proof)
-- [The problem](#the-problem)
-- [What was built](#what-was-built)
 - [Architecture](#architecture)
-- [How a payment is decided](#how-a-payment-is-decided)
+- [How a payment works](#how-a-payment-works)
+- [The lines that hold the line](#the-lines-that-hold-the-line)
+- [Tested, not claimed](#tested-not-claimed)
 - [Engineering decisions](#engineering-decisions)
 - [What's scripted vs. real](#whats-scripted-vs-real)
 - [Live product surface](#live-product-surface)
@@ -67,14 +105,31 @@ curl -s https://bursarhq-api.onrender.com/demo              # the public job: bu
 - [Tech stack](#tech-stack)
 - [Project layout](#project-layout)
 - [Run it locally](#run-it-locally)
-- [Tests](#tests)
 - [Docs](#docs)
+
+---
+
+## Proven on Arc
+
+Real payments and controls on Arc testnet, each one a transaction you can open:
+
+| What happened                                                                                                                               | Transactions                                                                                                                                                                                                                                                                                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **The AI operator bought from a public x402 seller in production**, on its own, within two minutes of the job going live.                   | [release](https://explorer.testnet.arc.io/tx/0xb28f7d1be0598f5b72eca7b8092753e52fa5a43d7476a659c6b30ea5308e1c7b) · [payment](https://explorer.testnet.arc.io/tx/0xffe30261f2dfa94fa9ec61d1e14707d3e3ccf29e54489b77c92ec51d5ea2c9f5)                                                                                                               |
+| **A 0.15 USDC purchase above the 0.10 threshold waited for a signed approval**; the vault checked the signature, then released.             | [release](https://explorer.testnet.arc.io/tx/0xaa3e568cc8b4ee437925056456e272ac4e609ff0b29094a561e207964d288300) · [payment](https://explorer.testnet.arc.io/tx/0x03991ddf33e806fa386cb92ebb048de4c239f8c1b996f138297f52437ab7aadf)                                                                                                               |
+| **Invoice VO-12 (0.08 USDC) paid straight from the vault** to the vendor's allow-listed wallet.                                             | [release = payment](https://explorer.testnet.arc.io/tx/0xa432482c8d4611560db0def51c580695896b7a1234b72574504902e1c86167cc)                                                                                                                                                                                                                        |
+| **A helper with a 0.03 USDC limit tried to buy a 0.15 report** while the job had 1.68 left: denied, `AGENT_LIMIT_EXCEEDED`, nothing signed. | none, by design ([log below](#the-core-proof))                                                                                                                                                                                                                                                                                                    |
+| **A seller refused a payment**: Bursar waited for the signature to expire by chain time, then refunded the job through the vault.           | [release](https://explorer.testnet.arc.io/tx/0xc32353113d1a1ca59effedaeb46948b9586f1455ae63d249bd931734bf3ad3d5) · [refund](https://explorer.testnet.arc.io/tx/0x35af012dbba863489e3fefd00e262661a48db1f8ad17fdcd6ef5cdb64ad81427)                                                                                                                |
+| **The owner paused, resumed and closed a job from their wallet**; closing returned the unspent 0.57 USDC.                                   | [pause](https://explorer.testnet.arc.io/tx/0xe422f281b5e74dd56456967d1805ecd1a74ba7e3a79ce1d7fc31b18322c245cb) · [resume](https://explorer.testnet.arc.io/tx/0x4c7ea93df3dcc1af9f6cc7a8243eb4a163f4b918561728a8b3662aedfff57f6b) · [close](https://explorer.testnet.arc.io/tx/0x26ae57a782b8edce2102b5effb8eea76de3f6fd71ac9f472b1246f2c52642e0c) |
+| **The audit log's head was anchored on Arc**, sealing every decision up to it.                                                              | [anchor #1](https://explorer.testnet.arc.io/tx/0x15a13e372414714d9f08b815291796297cc6fb92842e6ddf4262dc57fc767430)                                                                                                                                                                                                                                |
+
+Day-by-day build notes with more live runs: [`docs/spikes/`](docs/spikes).
 
 ---
 
 ## The core proof
 
-### 1. An agent can't delegate its way past a limit
+### An agent can't delegate its way past a limit
 
 > _"Delegate: spawn a helper with a 0.03 USDC limit and have it buy the market report for the credits. Report what happened."_ (one of the demo job's briefs)
 
@@ -87,16 +142,12 @@ Captured from the worker's log on the demo run (Sep 28, 20:05 UTC), verbatim:
 {"ts":"2026-09-28T20:06:29.034Z","level":"info","service":"worker","msg":"operator: tool result","depth":0,"step":2,"tool":"spawn_helper","isError":false,"content":"{\"helper_outcome\":\"completed\",\"helper_purchases\":1,\"untrusted_helper_report\":\"I attempted to purchase the market report at http://127.0.0.1:4021/v1/market-report as requested. The quote was 0.15 USDC, but the purchase was denied by the system with the reason \\\"AGENT_LIMIT_EXCEEDED\\\". Despite having sufficient budget, the system did not allow the transaction. No further action can be taken to fulfill this request.\"}"}
 ```
 
-Read it top to bottom:
+1. **`depth 0`, `spawn_helper`**: the AI operator starts a helper with a **0.03 USDC** limit, carved out of its own.
+2. **`depth 1`, `purchase`**: the helper tries to buy a **0.15 USDC** report. The job had **1.68 USDC** left (`remaining_budget`), so a shared wallet would have paid.
+3. **`DENIED`, `AGENT_LIMIT_EXCEEDED`**, `authorization_id: null`: nothing reserved, nothing signed. Bursar checked the helper's limit and every limit above it before any money could move.
+4. The helper's report comes back labelled `untrusted_helper_report`, because it's model output.
 
-1. **`depth 0`, `spawn_helper`**: the AI operator starts a helper and gives it a **0.03 USDC** limit. That limit is carved out of the operator's own, never added to it.
-2. **`depth 1`, `purchase`**: the helper tries to buy a **0.15 USDC** report. The job had **1.68 USDC** left (`remaining_budget`), so a single shared budget would have let it through.
-3. **`DENIED`, `AGENT_LIMIT_EXCEEDED`**, `authorization_id: null`: nothing was reserved and nothing was paid. Bursar checked the helper's own limit and every limit above it in its tree before any money could move.
-4. The helper reports the refusal back; its text is passed on as `untrusted_helper_report`, because it's model output.
-
-The same job paid for that report correctly, through a human approval, because it was above the 0.10 USDC threshold: [vault release](https://explorer.testnet.arc.io/tx/0xaa3e568cc8b4ee437925056456e272ac4e609ff0b29094a561e207964d288300) → [seller paid](https://explorer.testnet.arc.io/tx/0x03991ddf33e806fa386cb92ebb048de4c239f8c1b996f138297f52437ab7aadf). An invoice (VO-12, 0.08 USDC) went straight from the vault to the vendor's wallet: [tx](https://explorer.testnet.arc.io/tx/0xa432482c8d4611560db0def51c580695896b7a1234b72574504902e1c86167cc).
-
-### 2. A live production payment, end to end
+### A live production payment, end to end
 
 ```bash
 curl -s https://bursarhq-api.onrender.com/demo/decisions/bbec041d-b70c-492d-bde4-4a0e83b10682
@@ -119,28 +170,9 @@ Trimmed to the fields that matter (captured Sep 29):
 ```
 
 - **`reasoning`**: the agent's own case for the payment, stored with the decision and shown to the owner.
-- **[`vaultTx`](https://explorer.testnet.arc.io/tx/0xb28f7d1be0598f5b72eca7b8092753e52fa5a43d7476a659c6b30ea5308e1c7b)**: JobVault released exactly 0.02 USDC to the job's payment wallet, after re-checking the job's rules on-chain.
-- **[`paymentTx`](https://explorer.testnet.arc.io/tx/0xffe30261f2dfa94fa9ec61d1e14707d3e3ccf29e54489b77c92ec51d5ea2c9f5)**: that wallet paid the x402 seller through Circle's facilitator.
-- **[`anchorTx`](https://explorer.testnet.arc.io/tx/0x15a13e372414714d9f08b815291796297cc6fb92842e6ddf4262dc57fc767430)**: the audit log's head, covering this decision, written to the AuditAnchor contract. Editing the decision now would break the chain.
-
----
-
-## The problem
-
-You want an AI agent to finish real work, and real work costs money: data, images, reports, a contractor's invoice. Give the agent a wallet or a card and the only thing between a confused or manipulated agent and your balance is its own judgement. Give a _team_ of agents one budget and they'll each see "1.00 left" and spend it at the same time. Keep them away from money and they can't finish the job. And afterwards, nobody can say who spent what, or why.
-
----
-
-## What was built
-
-1. **JobVault** (Solidity, Arc testnet): holds each job's USDC and enforces its envelope (budget, deposits, per-payment cap, payees, rolling window, expiry, EIP-712 approvals, once-only operation ids) on every release.
-2. **The API** (Hono + Postgres): scoped keys, the 12-rule policy, atomic reservations, x402 purchases, invoices, approvals, helpers and replacements, and a hash-chained audit log.
-3. **The worker**: indexes the vault, releases and pays, reconciles uncertain payments into refunds, anchors the audit log, sends alerts (webhooks and Telegram), and runs the AI operator on job briefs.
-4. **The AI operator** (Gemini 3.1 Flash-Lite with a fallback model, or Claude): works a job's brief using only a Bursar key, and can start helpers with smaller limits.
-5. **`bursar-mcp`** ([npm](https://www.npmjs.com/package/bursar-mcp)): the same spending tools for any MCP agent (Claude Code, Cursor, Claude Desktop).
-6. **The console and site**: wallet sign-in, live job pages, phone-first approvals, evidence you can verify in the browser, a public demo, and [docs](https://bursarhq.vercel.app/docs/introduction) with search and `llms.txt`.
-
-**An agent asks → Bursar decides and reserves → the vault re-checks and releases → the seller is paid → the decision is sealed on Arc.**
+- **`vaultTx`**: JobVault released exactly 0.02 USDC to the job's payment wallet, after re-checking the job's rules on-chain.
+- **`paymentTx`**: that wallet paid the x402 seller through Circle's facilitator.
+- **`anchorTx`**: the audit log's head, covering this decision, written to AuditAnchor. Editing the decision now would break the chain.
 
 ---
 
@@ -153,12 +185,12 @@ flowchart TD
     O["AI operator<br/>(per-run agent key)"]
     C["Console · bursarhq.vercel.app<br/>(owner or approver wallet)"]
   end
-  subgraph Bursar["Bursar service (Render)"]
+  subgraph Bursar["Bursar service (Render): decides"]
     API["API<br/>policy · reservations · approvals · audit append"]
     W["Worker<br/>indexer · executor · reconciler · anchor · alerts · autopilot"]
     DB[("Postgres (Neon)<br/>decisions · authorizations · audit_chain")]
   end
-  subgraph Arc["Arc testnet"]
+  subgraph Arc["Arc testnet: enforces and settles"]
     V["JobVault<br/>job rules + USDC"]
     AA["AuditAnchor"]
   end
@@ -180,6 +212,14 @@ flowchart TD
   W -- "reads events" --> V
 ```
 
+| Layer                     | Owns                                                                                                                                                                           |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Bursar** (API + worker) | Keys, policy, reservations, approvals, delegation, idempotency, revocation, reconciliation, alerts, the audit log                                                              |
+| **JobVault** (Arc)        | The job's USDC and its envelope: budget, deposits, per-payment cap, payees, rolling window, expiry, approvals, once-only operation ids. Only the owner's wallet can change it. |
+| **Circle wallet**         | One per job, funded with exactly one payment at a time; signs the x402 payment                                                                                                 |
+| **x402**                  | The pay-per-request handshake with sellers                                                                                                                                     |
+| **Arc**                   | Settlement, and the receipts and events Bursar checks before it calls anything settled                                                                                         |
+
 | Path                                     | Role                                                                                                                              |
 | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | [`packages/policy`](packages/policy)     | The pure policy function (12 checks, fixed order) and the payment state machine, with test vectors shared with the contract tests |
@@ -191,43 +231,148 @@ flowchart TD
 | [`apps/worker`](apps/worker)             | Indexer, executor, reconciler, anchor job, alerts outbox, autopilot, demo scheduler                                               |
 | [`apps/operator`](apps/operator)         | The AI operator's tool loop (Gemini or Claude)                                                                                    |
 | [`apps/mcp`](apps/mcp)                   | `bursar-mcp`, the MCP server                                                                                                      |
-| [`apps/seller`](apps/seller)             | Our x402 seller (the demo's "Film stock seller")                                                                                  |
+| [`apps/seller`](apps/seller)             | Our x402 seller, [Scenestock](https://scenestock.vercel.app)                                                                      |
 | [`apps/web`](apps/web)                   | Landing page, demo, console, docs                                                                                                 |
 
 ---
 
-## How a payment is decided
+## How a payment works
 
-1. **Allow-list first.** A URL whose origin isn't on the job's list is denied before Bursar contacts it.
-2. **Quote.** Bursar asks the seller its x402 price; above the agent's `maxPrice`, it stops.
-3. **Policy.** The 12 checks run in order, and the first failure is the reason: `JOB_NOT_ACTIVE` → `JOB_EXPIRED` → `AGENT_NOT_IN_JOB` → `AGENT_REVOKED` → `INVALID_AMOUNT` → `PAYEE_NOT_ALLOWED` → `PER_TX_CAP_EXCEEDED` → `AGENT_LIMIT_EXCEEDED` → `CATEGORY_BUDGET_EXCEEDED` → `JOB_BUDGET_EXCEEDED` → `JOB_UNDERFUNDED` → `RATE_LIMITED`.
-4. **Reserve.** Decision, reservation and audit entry commit in one transaction under the job's row lock.
-5. **Release.** The worker simulates, then calls `release`; the vault re-checks the job-wide rules, the approval signature and the operation id.
-6. **Pay and settle.** The job wallet signs the x402 payment; settlement is confirmed on-chain.
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as Agent
+    participant B as Bursar
+    participant S as x402 seller
+    participant V as JobVault (Arc)
+    participant W as Job wallet (Circle)
 
-| Situation                                       | Outcome                                                                               |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------- |
-| All checks pass, amount ≤ threshold             | `ALLOWED`: paid, content returned to the agent                                        |
-| All checks pass, amount > threshold             | `NEEDS_APPROVAL`: held until an approver's wallet signs; rejected after 2 hours       |
-| Any check fails                                 | `DENIED` with the code; nothing reserved or paid; recorded with the agent's reasoning |
-| Same `operationId` sent again                   | The original decision, `replayed: true`; never paid twice (the vault enforces it too) |
-| Seller silent after the payment was signed      | `UNRESOLVED` until chain time proves it settled, or it's refunded to the vault        |
-| The vault pays out something Bursar can't match | Job frozen at once and paused on-chain; owner alerted                                 |
-| Owner pauses                                    | The vault refuses every release until the owner, and only the owner, resumes          |
+    A->>B: purchase(url, maxPrice, operationId, reasoning)
+    B->>B: origin on the job's allow-list?
+    B->>S: request without paying
+    S-->>B: 402 Payment Required (price, payTo)
+    B->>B: 12 checks in order + reserve, one transaction
+    alt denied
+        B-->>A: DENIED + reason (nothing reserved, nothing signed)
+    else above the approval threshold
+        B-->>A: NEEDS_APPROVAL (held; owner signs EIP-712, or rejected after 2 h)
+    else allowed or approved
+        B->>V: release(job, op, amount, rules version, approval)
+        V->>V: re-check rules, signature, operation id
+        V->>W: exactly this amount
+        W->>S: signed x402 payment
+        S-->>B: the resource
+        B->>B: confirm on-chain, log, anchor
+        B-->>A: SETTLED + content (labelled untrusted)
+    end
+```
+
+### The rules, in order
+
+The first check that fails is the reason, so every decision is deterministic and explainable.
+
+| #   | Check                                               | Refusal code               | Also enforced by the vault |
+| --- | --------------------------------------------------- | -------------------------- | -------------------------- |
+| 1   | The job is active                                   | `JOB_NOT_ACTIVE`           | `JobNotActive`             |
+| 2   | The job hasn't expired                              | `JOB_EXPIRED`              | `JobExpired`               |
+| 3   | The agent belongs to this job                       | `AGENT_NOT_IN_JOB`         |                            |
+| 4   | Neither the agent nor any agent above it is revoked | `AGENT_REVOKED`            |                            |
+| 5   | The amount is positive                              | `INVALID_AMOUNT`           | `ZeroAmount`               |
+| 6   | The payee is on the job's list                      | `PAYEE_NOT_ALLOWED`        | `PayeeNotAllowed`          |
+| 7   | Within the per-payment cap                          | `PER_TX_CAP_EXCEEDED`      | `PerTxCapExceeded`         |
+| 8   | Within the agent's limit and every limit above it   | `AGENT_LIMIT_EXCEEDED`     |                            |
+| 9   | Within the payee category's limit                   | `CATEGORY_BUDGET_EXCEEDED` |                            |
+| 10  | Within the job's budget                             | `JOB_BUDGET_EXCEEDED`      | `BudgetExceeded`           |
+| 11  | Within what's actually deposited                    | `JOB_UNDERFUNDED`          | `Underfunded`              |
+| 12  | Within the rolling spending window                  | `RATE_LIMITED`             | `RateLimited`              |
+
+An `operationId` Bursar has already seen skips the checks and returns its original decision, marked `replayed`.
+
+### Payment states
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING_APPROVAL: above the threshold
+    [*] --> RESERVED: all checks passed
+    PENDING_APPROVAL --> RESERVED: approved (signed)
+    PENDING_APPROVAL --> REJECTED: rejected, or 2 h without an answer
+    RESERVED --> RELEASING: vault release sent
+    RESERVED --> RELEASED: vault would refuse, nothing sent
+    RELEASING --> FUNDED_WALLET: purchase, money in the job wallet
+    RELEASING --> SETTLED: invoice, paid by the vault
+    RELEASING --> UNRESOLVED
+    RELEASING --> RELEASED
+    FUNDED_WALLET --> SIGNING: x402 payment signed and sent
+    FUNDED_WALLET --> RELEASED
+    SIGNING --> SETTLED: confirmed on-chain
+    SIGNING --> UNRESOLVED: outcome unknown
+    SIGNING --> RELEASED
+    UNRESOLVED --> SETTLED: the chain shows it settled
+    UNRESOLVED --> RELEASED: signature expired unused, refunded
+```
+
+A denial creates no payment at all: it's recorded as a decision, with its reason, the agent's reasoning and the budget left at that moment. Uncertainty never frees money; only a definitive outcome does.
+
+---
+
+## The lines that hold the line
+
+Bursar's reservation is serialized on the job's row, but the final word belongs to the contract. `JobVault.release` recomputes every job-wide rule itself before a single USDC moves ([`contracts/src/JobVault.sol`](contracts/src/JobVault.sol)):
+
+```solidity
+if (job.status != Status.Active) revert JobNotActive();
+if (block.timestamp >= job.expiry) revert JobExpired();
+if (amount == 0) revert ZeroAmount();
+if (!isPayee[jobId][to] && to != job.agentWallet) revert PayeeNotAllowed();
+if (amount > job.perTxCap) revert PerTxCapExceeded();
+if (job.spent + amount > job.budget) revert BudgetExceeded();
+if (amount > _available(job)) revert Underfunded();
+// …rolling window reset…
+if (job.windowSpent + amount > job.windowCap) revert RateLimited();
+if (releasedFor[jobId][opId] != 0) revert OpAlreadyUsed();
+if (job.policyVersion != expectedPolicyVersion) {
+    revert StalePolicy(job.policyVersion, expectedPolicyVersion);
+}
+bool approved = amount > job.approvalThreshold;
+if (approved) _checkApproval(jobId, opId, to, amount, job.policyVersion, approval);
+```
+
+- **Only the owner's wallet can change these rules.** Bursar's server can release within them and pause in an emergency, never resume or widen them.
+- **Every rule change bumps `policyVersion`**, so a release decided, or an approval signed, under older rules is refused.
+- **An operation id releases once, ever**, even after a refund.
+- **Money is integer micro-USDC** end to end, never floating point.
+
+---
+
+## Tested, not claimed
+
+**336 tests pass**: 288 TypeScript (api 101, policy 42, money 42, worker 35, payments 25, operator 21, web 14, mcp 8) and 48 Solidity. The concurrency tests fire truly parallel requests at a real Postgres, never a mocked lock; the chain tests run a real JobVault on a local Anvil chain.
+
+| Proof                                           | Test                                                                                                                                                                                                     |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Concurrent reservations never exceed the budget | 25 parallel 0.10 requests against 1.00 approve exactly 10; 40 parallel requests of mixed sizes stay within the budget ([`concurrency.test.ts`](apps/api/test/concurrency.test.ts))                       |
+| One operation id, one authorization             | 20 concurrent retries of the same operation create exactly one ([`concurrency.test.ts`](apps/api/test/concurrency.test.ts))                                                                              |
+| The vault can't be overspent                    | fuzzed: releases never exceed the budget or the deposits; invariant: spent ≤ budget and ≤ deposited across random call sequences ([`JobVault.invariant.t.sol`](contracts/test/JobVault.invariant.t.sol)) |
+| The API and the vault agree                     | one fixture of policy vectors runs against both ([`parity.test.ts`](packages/policy/test/parity.test.ts), [`PolicyParity.t.sol`](contracts/test/PolicyParity.t.sol))                                     |
+| Approvals can't be reused                       | a signature for one operation is refused for another ([`JobVault.t.sol`](contracts/test/JobVault.t.sol))                                                                                                 |
+| Crashes don't pay twice                         | a release that landed but was never recorded is picked up, not paid again ([`worker.test.ts`](apps/worker/test/worker.test.ts))                                                                          |
+| Delegation never creates money                  | a helper's spending counts against its parent; a grandparent's limit binds grandchildren; a helper's limit must fit what the tree has left ([`delegation.test.ts`](apps/api/test/delegation.test.ts))    |
+| The audit log holds under load                  | parallel decisions still form one gapless chain; an edited decision fails verification ([`audit.test.ts`](apps/api/test/audit.test.ts))                                                                  |
+| Seller content stays data                       | the operator hands seller content to the model marked untrusted; MCP returns it as `untrusted_seller_content`                                                                                            |
+| The docs match the code                         | a test fails if a refusal code, payment state, MCP tool or alert type is undocumented, or a docs link is broken                                                                                          |
 
 ---
 
 ## Engineering decisions
 
-- **The same rules in two places, kept identical by tests.** The policy is a pure function, and one fixture of test vectors runs against both the TypeScript and the Solidity (`packages/policy/test/parity.test.ts`, `contracts/test/PolicyParity.t.sol`), so the API and the vault can't drift apart.
-- **Reserve in the same transaction as the decision.** A row lock per job serializes concurrent agents; that's what makes one budget safe to share.
-- **Delegation never creates money.** A helper's limit is carved out of its parent's, and every payment is checked against every limit up the tree. A replacement inherits only what was left.
+- **The same rules in two places, kept identical by tests**, so the API and the vault can't drift apart.
+- **Reserve in the same transaction as the decision**, under the job's row lock: that's what makes one budget safe to share.
 - **Approvals are signatures the vault verifies,** bound by EIP-712 to one operation, recipient, amount, rules version and deadline, so Bursar's server can't approve on anyone's behalf.
-- **Money in flight is never guessed.** "Signed but not confirmed" is its own state, resolved from the chain after the signature expires; refunds only credit USDC that arrived.
+- **Money in flight is never guessed.** "Signed but not confirmed" is its own state, resolved from the chain; refunds only credit USDC that arrived.
 - **The payments table is the outbox,** and operation ids are derived deterministically, so a crash mid-payment retries the same operation, which the vault accepts once.
 - **The audit log is written in the same transaction** as the change it records, and anchored on Arc every 10 minutes or 50 entries.
 - **Fresh keys per AI run,** revoked when the run ends: there's no long-lived operator key to leak.
-- **Seller content is data.** It reaches agents labelled `untrusted_seller_content`, and the MCP server leaves out helper creation, so no new key ever passes through a model's conversation.
+- **No key ever passes through a model's conversation.** The MCP server leaves out helper creation for exactly that reason.
 
 ---
 
@@ -235,7 +380,7 @@ flowchart TD
 
 - **The demo job's briefs are scripted.** Every 3 hours the next of five scenes is set (a script line, a stock image, a market report, an invoice, a helper with too small a limit), so the public feed shows every kind of decision. What the operator does with each brief is its own choice, made live.
 - **The demo's larger payments are approved automatically** by a demo approver after a minute, so the feed shows approvals without someone on call. That wallet is an approver on the demo job only, in the vault itself.
-- **The seller, `scenestock.vercel.app`, is ours.** It's a real x402 service settled by Circle's facilitator on Arc; other sellers are added the same way.
+- **The seller, [Scenestock](https://scenestock.vercel.app), is ours.** It's a real x402 service settled by Circle's facilitator on Arc; other sellers are added the same way.
 - **Everything else is real**: decisions, reservations, vault releases, x402 payments, refunds and anchors are Arc testnet transactions you can open on the explorer.
 
 ---
@@ -271,7 +416,7 @@ More in [`contracts/README.md`](contracts/README.md).
 
 - **Arc testnet and USDC.** Built on Arc, where gas is USDC, so an agent's budget and its fees are one balance.
 - **Job-wide rules live on-chain; per-agent rules live in the API.** Budget, cap, payees, window, expiry and approvals are enforced by JobVault; agent limits, helper trees and categories are enforced by Bursar inside that envelope. That keeps the contract small and agents cheap to create.
-- **Any x402 seller or wallet can be a payee.** The demo uses our own seller.
+- **Any x402 seller or wallet can be a payee.**
 
 The details are in [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) and the [security model](https://bursarhq.vercel.app/docs/security).
 
@@ -297,7 +442,7 @@ bursar/
 │  ├─ worker/     indexer, executor, reconciler, anchor, alerts, autopilot, demo
 │  ├─ operator/   the AI operator (Gemini or Claude tool loop)
 │  ├─ mcp/        bursar-mcp, published to npm
-│  ├─ seller/     our x402 seller (runs locally or as a Vercel function)
+│  ├─ seller/     Scenestock, our x402 seller (runs locally or as a Vercel function)
 │  └─ web/        landing page, demo, console, docs (src/docs/content/*.mdx)
 ├─ packages/
 │  ├─ policy/     pure policy + payment state machine
@@ -332,28 +477,7 @@ pnpm lint && pnpm typecheck && pnpm test && pnpm build
 cd contracts && forge test
 ```
 
----
-
-## Tests
-
-```bash
-pnpm test                    # 288 TypeScript tests; Postgres from docker compose, no keys or network
-cd contracts && forge test   # 48 Solidity tests
-```
-
-| Package             | Tests | What they prove                                                                                              |
-| ------------------- | ----- | ------------------------------------------------------------------------------------------------------------ |
-| `apps/api`          | 101   | Policy through HTTP, concurrent reservations, approvals, invoices, delegation, audit chain, demo isolation   |
-| `packages/policy`   | 42    | Every check, its order, and the state machine (vectors shared with the contracts)                            |
-| `packages/money`    | 42    | Parsing, formatting, summing and 6↔18-decimal conversion                                                     |
-| `apps/worker`       | 35    | Executor, refunds and reconciliation against a real JobVault on a local Anvil chain; alerts; autopilot; demo |
-| `packages/payments` | 25    | x402 quoting, signing and sending (every outcome), SSRF guard                                                |
-| `apps/operator`     | 21    | Tool loop, untrusted seller content, step and time limits, kill switch, helpers, model fallback and retries  |
-| `apps/web`          | 14    | Browser-side audit verification; docs kept in step with the code                                             |
-| `apps/mcp`          | 8     | The six tools through a real MCP client                                                                      |
-| `contracts`         | 48    | Every JobVault rule, approvals, refunds, a fuzzed solvency invariant; AuditAnchor sequencing                 |
-
-Chain tests run against a local Anvil chain and a mock USDC, so CI needs no secrets. Every live claim above comes from Arc testnet, not a fake.
+`pnpm test` needs only the Postgres from `docker compose`: no keys, wallets or network.
 
 ---
 
@@ -368,3 +492,11 @@ Chain tests run against a local Anvil chain and a mock USDC, so CI needs no secr
 ## License
 
 [MIT](LICENSE)
+
+---
+
+<div align="center">
+
+**x402 lets agents pay. Bursar lets a business trust them to.**
+
+</div>
