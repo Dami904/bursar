@@ -173,6 +173,20 @@ export interface ApiDeps {
    * job still needs its owner's key. It's our own business's job, so its data is ours to show.
    */
   readonly demoJobId?: string | undefined;
+  /** One JSON line per request (method, path, status, time). Off in tests. */
+  readonly logRequests?: boolean;
+}
+
+function logLine(level: "info" | "warn" | "error", msg: string, fields: Record<string, unknown>) {
+  const line = JSON.stringify({
+    ts: new Date().toISOString(),
+    level,
+    service: "api",
+    msg,
+    ...fields,
+  });
+  (level === "info" ? process.stdout : process.stderr).write(`${line}
+`);
 }
 
 const PUBLIC_PATHS = new Set(["/health", "/metrics/public", "/auth/nonce", "/auth/verify"]);
@@ -205,6 +219,24 @@ function require<R extends Role>(c: Context<Env>, ...roles: R[]): Extract<Princi
 
 export function createApp(db: Db, deps: ApiDeps = {}) {
   const app = new Hono<Env>();
+
+  // Request log: never the query string, headers or body, so keys and secrets can't leak into it.
+  // Health checks are skipped: the uptime pinger would drown everything else.
+  if (deps.logRequests) {
+    app.use("*", async (c, next) => {
+      const started = performance.now();
+      await next();
+      if (c.req.path === "/health" || c.req.method === "OPTIONS") return;
+      const status = c.res.status;
+      logLine(status >= 500 ? "error" : status >= 400 ? "warn" : "info", "request", {
+        method: c.req.method,
+        path: c.req.path,
+        status,
+        ms: Math.round(performance.now() - started),
+        role: c.get("principal")?.role ?? null,
+      });
+    });
+  }
 
   // The console calls the API from the browser. Only listed origins, and keys travel in the
   // Authorization header (never cookies), so there's no cross-site request to forge.

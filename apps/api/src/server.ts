@@ -55,6 +55,7 @@ const app = createApp(db, {
   webOrigins: webOrigins,
   telegramBot: env.TELEGRAM_BOT_USERNAME,
   demoJobId: env.DEMO_JOB_ID,
+  logRequests: true,
   siwe: { domains: webOrigins.map((origin) => new URL(origin).host), chainId: env.ARC_CHAIN_ID },
 });
 
