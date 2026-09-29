@@ -16,6 +16,7 @@ import { reconcileOnce } from "./reconciler.js";
 
 /** Any fixed number: every Bursar worker competes for this one advisory lock. */
 const WORKER_LOCK = 4_242_001;
+const DEMO_EVERY_MS = 30_000;
 
 export interface RunningWorker {
   stop(): Promise<void>;
@@ -120,6 +121,7 @@ export async function startWorker(env: WorkerEnv): Promise<RunningWorker | null>
         };
 
   let running = true;
+  let lastDemoAt = 0;
   const loop = (async () => {
     log.info("worker started", { operator: operator.account.address, vault, chainId: chain.id });
     while (running) {
@@ -187,7 +189,10 @@ export async function startWorker(env: WorkerEnv): Promise<RunningWorker | null>
       } catch (error) {
         log.error("alerts tick failed", error);
       }
-      if (demo !== null) {
+      // The demo only needs a look every 30 seconds: briefs rotate every few hours and approvals
+      // wait a minute. Checking every tick would flood the API's request log.
+      if (demo !== null && Date.now() - lastDemoAt >= DEMO_EVERY_MS) {
+        lastDemoAt = Date.now();
         try {
           await rotateDemoBrief(demo);
           await approveDemoPayments(demo);
