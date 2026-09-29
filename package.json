@@ -12,7 +12,8 @@
     "format:check": "prettier --check .",
     "typecheck": "pnpm -r typecheck",
     "build": "pnpm -r build",
-    "test": "pnpm -r --workspace-concurrency=1 test"
+    "test": "pnpm -r --workspace-concurrency=1 test",
+    "start:production": "node scripts/start-production.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
