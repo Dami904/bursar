@@ -9,8 +9,14 @@ const services = [
   ["worker", ["--filter", "@bursar/worker", "start"]],
 ];
 
+// Reuse the pnpm that started this script (e.g. `corepack pnpm start:production`), so both
+// services run on the version pinned in package.json rather than whatever the host has.
+const pnpm = process.env.npm_execpath;
+
 const children = services.map(([name, args]) => {
-  const child = spawn("pnpm", args, { stdio: "inherit", shell: process.platform === "win32" });
+  const child = pnpm
+    ? spawn(process.execPath, [pnpm, ...args], { stdio: "inherit" })
+    : spawn("pnpm", args, { stdio: "inherit", shell: process.platform === "win32" });
   child.on("exit", (code, signal) => {
     console.error(`${name} exited (${signal ?? code}); stopping`);
     for (const other of children) if (other !== child) other.kill("SIGTERM");
