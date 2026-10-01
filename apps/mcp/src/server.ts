@@ -100,7 +100,7 @@ async function run(fn: () => Promise<unknown>): Promise<CallToolResult> {
  * The agent's spending tools. Every call goes through Bursar with one agent key, so whatever the
  * model asks for, it can only spend what that key's job and rules allow.
  */
-export function createServer(bursar: BursarClient, version = "0.1.1"): McpServer {
+export function createServer(bursar: BursarClient, version = "0.2.0"): McpServer {
   const server = new McpServer(
     { name: "bursar", version },
     {

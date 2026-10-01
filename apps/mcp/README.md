@@ -35,6 +35,8 @@ Or in `.cursor/mcp.json` / `claude_desktop_config.json`:
 | `pay_invoice`   | Pay a vendor's invoice to its allow-listed wallet               |
 | `check_payment` | Follow a payment that is waiting for approval or still settling |
 
+`quote` and `purchase` take an optional `method` (`GET` by default, or `POST`) and a JSON `body` of up to 4 KB, for sellers such as search APIs that answer `POST`.
+
 Refusals come back as tool errors or `denial_reason` codes (`PAYEE_NOT_ALLOWED`, `PER_TX_CAP_EXCEEDED`, `AGENT_LIMIT_EXCEEDED`, `JOB_BUDGET_EXCEEDED`, …) so the agent can change plans. Payments take an optional `operation_id`: retrying with the same one never pays twice. Seller content is returned as `untrusted_seller_content`.
 
 ## Develop
