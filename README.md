@@ -92,6 +92,7 @@ curl -s https://bursarhq-api.onrender.com/demo              # the public job: bu
 ## Contents
 
 - [Proven on Arc](#proven-on-arc)
+- [Circle tools in use](#circle-tools-in-use)
 - [The core proof](#the-core-proof)
 - [Architecture](#architecture)
 - [How a payment works](#how-a-payment-works)
@@ -108,6 +109,25 @@ curl -s https://bursarhq-api.onrender.com/demo              # the public job: bu
 - [Docs](#docs)
 
 ---
+
+<!--
+  TRACTION GOES HERE (before "Proven on Arc"). Fill it in once real people have run jobs, then delete
+  this comment and add "- [Traction](#traction)" to the Contents list above.
+
+## Traction
+
+Live, from the public API: `curl -s https://bursarhq-api.onrender.com/metrics/public`
+
+| Businesses | Jobs | Decisions | USDC paid out | Payments settled | Human approvals | Audit entries | Anchors on Arc |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| n | n | n | x.xx | n | n | n | n |
+
+| Who | What they ran | Result |
+| --- | --- | --- |
+| Name or team (link) | What the job was and what the agent bought | What happened: payments, approvals, blocks |
+
+> "A short quote from a real user." (Name, role)
+-->
 
 ## Proven on Arc
 
@@ -126,6 +146,20 @@ Real payments and controls on Arc testnet, each one a transaction you can open:
 | **The audit log's head was anchored on Arc**, sealing every decision up to it.                                                                                                                                         | [anchor #1](https://explorer.testnet.arc.io/tx/0x15a13e372414714d9f08b815291796297cc6fb92842e6ddf4262dc57fc767430)                                                                                                                                                                                                                                |
 
 Day-by-day build notes with more live runs: [`docs/spikes/`](docs/spikes).
+
+---
+
+## Circle tools in use
+
+Each of these does real work in production. None is decorative, and each row points at the code and at a transaction you can open.
+
+| Circle tool                              | What Bursar uses it for                                                                                                                                                                                                                                                                                                           | Code                                                                                                                                             | Proof on Arc                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Developer-controlled wallets**         | One wallet per job, created through Circle's wallets API. It's funded one payment at a time, and Circle holds its key, so a job wallet's key never touches Bursar's servers. It signs x402 payments (EIP-712), sends refunds, and runs contract calls (approve and deposit into Gateway).                                         | [`wallets.ts`](packages/payments/src/wallets.ts)                                                                                                 | [payment](https://explorer.testnet.arc.io/tx/0xffe30261f2dfa94fa9ec61d1e14707d3e3ccf29e54489b77c92ec51d5ea2c9f5)                                                                                                                                                                                                                                                                                                                                                              |
+| **x402 and Circle's hosted Facilitator** | Agents pay x402 sellers with signed payments. Our seller, Scenestock, is verified and settled by Circle's hosted x402 Facilitator service.                                                                                                                                                                                        | [`x402.ts`](packages/payments/src/x402.ts) · [`circle-facilitator.ts`](apps/seller/src/circle-facilitator.ts)                                    | [payment](https://explorer.testnet.arc.io/tx/0xffe30261f2dfa94fa9ec61d1e14707d3e3ccf29e54489b77c92ec51d5ea2c9f5)                                                                                                                                                                                                                                                                                                                                                              |
+| **Circle Gateway (Nanopayments)**        | Sub-cent purchases. A float moves from the vault into the job wallet's Gateway balance, each purchase is one gasless batched-x402 signature that Bursar confirms against Circle's transfers API, and a closed job's unspent float is withdrawn back to its owner (a burn intent that Circle attests and the GatewayMinter mints). | [`gateway.ts`](packages/payments/src/gateway.ts) · [`floats.ts`](apps/worker/src/floats.ts) · [`withdrawals.ts`](apps/worker/src/withdrawals.ts) | [float release](https://explorer.testnet.arc.io/tx/0xed118bd9e2181f1bbe184eba6990b4b49846e12eeddd0f49524ece9501d6e3be) · [deposit](https://explorer.testnet.arc.io/tx/0xefd1b614f790fa5e3d115adb539b868b634e8650f2ee4c2d6ad4bca00c0ef8f9) · [evidence page](https://bursarhq.vercel.app/demo/decisions/c32c366e-fcb5-4732-817a-f507c8902902) · [returned to the owner](https://explorer.testnet.arc.io/tx/0xc8369aa26e690bda7c8fc11de3647174f77d912c1c4b1cff3ebc40e16699be61) |
+| **USDC on Arc**                          | Every budget, payment and refund is USDC. Gas on Arc is USDC too, so an owner thinks in dollars only: there is no gas token to hold and no paymaster to run. JobVault and AuditAnchor are deployed on Arc testnet.                                                                                                                | [`contracts/`](contracts) · [deployed addresses](#deployed-contracts)                                                                            | [audit anchor](https://explorer.testnet.arc.io/tx/0x15a13e372414714d9f08b815291796297cc6fb92842e6ddf4262dc57fc767430)                                                                                                                                                                                                                                                                                                                                                         |
+| **Canteen RPC**                          | The production worker reads and writes Arc through the builder's own Canteen node, including every vault release, refund and anchor.                                                                                                                                                                                              | [`worker.ts`](apps/worker/src/worker.ts)                                                                                                         | every transaction above                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 ---
 
