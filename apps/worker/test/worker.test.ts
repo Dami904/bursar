@@ -15,9 +15,11 @@ import {
   approvalTypedData,
   auditAnchorAbi,
   jobVaultAbi,
+  paidRequest,
   quote,
   usdcAbi,
   vaultOpIdFor,
+  type PaidRequest,
 } from "@bursar/payments";
 import { sql, eq } from "drizzle-orm";
 import type { Hex } from "viem";
@@ -167,12 +169,17 @@ async function purchase(
   principal: AgentPrincipal,
   operationId: string,
   from: { readonly url: string } = seller,
+  request?: PaidRequest,
 ) {
-  const q = await quote(`${from.url}/insight`, {
-    network: `eip155:${chain.client.chain?.id ?? 31337}`,
-    asset: chain.usdc,
-    allowPrivateHosts: true,
-  });
+  const q = await quote(
+    `${from.url}/insight`,
+    {
+      network: `eip155:${chain.client.chain?.id ?? 31337}`,
+      asset: chain.usdc,
+      allowPrivateHosts: true,
+    },
+    request,
+  );
   const result = await requestSpend(db, principal, {
     operationId,
     kind: "PURCHASE",
@@ -182,7 +189,11 @@ async function purchase(
     rail: q.rail,
     payment: {
       url: q.url,
-      quote: { paymentRequired: q.paymentRequired, requirements: q.requirements },
+      quote: {
+        paymentRequired: q.paymentRequired,
+        requirements: q.requirements,
+        request: q.request,
+      },
     },
   });
   return result.authorization!;
@@ -257,6 +268,68 @@ describe("happy path", () => {
       reserved: 0n,
       unresolved: 0n,
     });
+  });
+});
+
+describe("sellers that take a POST body", () => {
+  it("quotes and pays with the same method and body, and the seller is paid once", async () => {
+    const { principal } = await liveJob();
+    const request = paidRequest("POST", { query: "agent budgets" });
+    const before = seller.requests.length;
+    const auth = await purchase(principal, "op-post-0000001", seller, request);
+
+    const done = await runUntil(auth.id, ["SETTLED"]);
+    expect(done.state).toBe("SETTLED");
+    expect(done.deliverable).toBe('{"insight":"paid"}');
+    // Every call this purchase made (the quote, then the paid call) was the same POST and JSON.
+    const calls = seller.requests.slice(before);
+    expect(calls.map((r) => r.paid)).toEqual([false, true]);
+    for (const call of calls) {
+      expect(call).toMatchObject({ method: "POST", body: '{"query":"agent budgets"}' });
+    }
+  });
+});
+
+describe("request integrity", () => {
+  it("never sends a request edited after the decision hashed it", async () => {
+    const { principal } = await liveJob();
+    const request = paidRequest("POST", { query: "agent budgets" });
+    const auth = await purchase(principal, "op-post-0000002", seller, request);
+    // Someone with database access swaps the body before the worker pays.
+    const [row] = await db.select().from(authorizations).where(eq(authorizations.id, auth.id));
+    await db
+      .update(authorizations)
+      .set({
+        paymentRequirements: {
+          ...(row!.paymentRequirements as Record<string, unknown>),
+          request: { method: "POST", body: '{"query":"something else"}' },
+        },
+      })
+      .where(eq(authorizations.id, auth.id));
+    const before = seller.requests.length;
+
+    const after = await runUntil(auth.id, ["SETTLED"], () => executeOnce(deps), 6);
+    expect(after.state).not.toBe("SETTLED");
+    expect(after.lastError).toMatch(/request no longer matches/);
+    expect(seller.requests.slice(before).filter((r) => r.paid)).toHaveLength(0);
+
+    // Put the decided request back and it goes through, paid once: nothing is left in limbo.
+    // (Only the request goes back: the signed payment saved since stays as it is.)
+    const [now] = await db.select().from(authorizations).where(eq(authorizations.id, auth.id));
+    await db
+      .update(authorizations)
+      .set({
+        paymentRequirements: {
+          ...(now!.paymentRequirements as Record<string, unknown>),
+          request: (row!.paymentRequirements as { request: unknown }).request,
+        },
+        nextAttemptAt: null,
+      })
+      .where(eq(authorizations.id, auth.id));
+    const done = await runUntil(auth.id, ["SETTLED"]);
+    expect(done.state).toBe("SETTLED");
+    expect(seller.requests.slice(before).filter((r) => r.paid)).toHaveLength(1);
+    expect(await chain.balanceOf(accounts.jobWallet.address)).toBe(0n);
   });
 });
 

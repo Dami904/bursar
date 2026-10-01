@@ -8,6 +8,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   QuoteError,
   UnsafeUrlError,
+  maxRequestBodyBytes,
+  paidRequest,
   assertFetchable,
   isPrivateAddress,
   publicFetchOptions,
@@ -67,9 +69,46 @@ function paymentRequired(
 /** A tiny seller whose behaviour each test picks via the path. */
 let server: Server;
 let base = "";
+/** What the POST-only /search route received on its last call. */
+let seen:
+  | { method?: string | undefined; contentType?: string | undefined; body: string; paid: boolean }
+  | undefined;
 beforeAll(async () => {
   server = createServer((req, res) => {
     const paid = req.headers["payment-signature"] !== undefined;
+    if (req.url === "/search") {
+      // A search seller: it only answers a POST with a JSON body, paid or not.
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk: Buffer) => chunks.push(chunk));
+      req.on("end", () => {
+        seen = {
+          method: req.method,
+          contentType: req.headers["content-type"],
+          body: Buffer.concat(chunks).toString("utf8"),
+          paid,
+        };
+        if (req.method !== "POST" || seen.body === "") {
+          res.writeHead(405);
+          return res.end("POST a JSON body");
+        }
+        if (!paid) {
+          res.writeHead(402, {
+            "PAYMENT-REQUIRED": encodePaymentRequiredHeader(paymentRequired()),
+          });
+          return res.end("{}");
+        }
+        res.writeHead(200, {
+          "PAYMENT-RESPONSE": encodePaymentResponseHeader({
+            success: true,
+            transaction: "0xabc",
+            network: NETWORK,
+            payer: account.address,
+          }),
+        });
+        return res.end('{"results":["paid"]}');
+      });
+      return;
+    }
     switch (req.url) {
       case "/insight":
         if (!paid) {
@@ -235,6 +274,41 @@ describe("quote", () => {
     await expect(
       quote(`${base}/insight`, { ...options, allowPrivateHosts: false }),
     ).rejects.toThrow(UnsafeUrlError);
+  });
+});
+
+describe("POST sellers", () => {
+  const request = paidRequest("POST", { query: "agent budgets", numResults: 2 });
+
+  it("quotes with the same method and JSON body the paid call will use", async () => {
+    const q = await quote(`${base}/search`, options, request);
+    expect(q.amount).toBe(10_000n);
+    expect(q.request).toEqual(request);
+    expect(seen).toMatchObject({
+      method: "POST",
+      contentType: "application/json",
+      body: '{"query":"agent budgets","numResults":2}',
+      paid: false,
+    });
+  });
+
+  it("pays with the same method and body, and the seller delivers", async () => {
+    const outcome = await sendPayment(`${base}/search`, "e30=", { request });
+    expect(outcome).toMatchObject({ kind: "PAID", body: '{"results":["paid"]}' });
+    expect(seen).toMatchObject({ method: "POST", paid: true, body: request.body });
+  });
+
+  it("a GET quote of a POST-only seller is refused, as before", async () => {
+    await expect(quote(`${base}/search`, options)).rejects.toThrow(/got HTTP 405/);
+  });
+
+  it("builds only valid requests", () => {
+    expect(paidRequest("GET", undefined)).toEqual({ method: "GET" });
+    expect(paidRequest("POST", undefined)).toEqual({ method: "POST" });
+    expect(() => paidRequest("GET", { a: 1 })).toThrow(QuoteError);
+    expect(() => paidRequest("POST", { text: "x".repeat(maxRequestBodyBytes) })).toThrow(
+      /at most 4096 bytes/,
+    );
   });
 });
 

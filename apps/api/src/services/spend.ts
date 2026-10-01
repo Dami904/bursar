@@ -15,6 +15,8 @@ import {
   commitAlongLineage,
   committedOf,
   decisionPayload,
+  requestHashOf,
+  storedRequestOf,
   decisions,
   gatewayFloatFree,
   jobs,
@@ -169,6 +171,14 @@ export async function requestSpend(
     });
 
     const counts = outcome.outcome !== "DENIED";
+    // A quoted purchase: what will be sent to the seller, hashed into the decision's audit entry.
+    const requestOf =
+      input.payment === undefined
+        ? null
+        : storedRequestOf({
+            paymentUrl: input.payment.url,
+            paymentRequirements: input.payment.quote,
+          });
     const [decision] = await tx
       .insert(decisions)
       .values({
@@ -181,6 +191,7 @@ export async function requestSpend(
         category,
         invoiceRef: input.invoiceRef ?? null,
         resourceUrl: input.resourceUrl ?? input.payment?.url ?? null,
+        requestHash: requestOf === null ? null : requestHashOf(requestOf),
         reasoning: input.reasoning,
         result: outcome.outcome,
         reason: outcome.outcome === "DENIED" ? outcome.reason : null,

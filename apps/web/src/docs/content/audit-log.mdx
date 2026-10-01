@@ -4,7 +4,7 @@ An audit trail is only worth something if it can't be quietly edited. Bursar's l
 
 Two kinds of entries, written in the **same database transaction** as the change they describe, so a change and its log entry succeed or fail together:
 
-- **`decision`**: every payment request, allowed, denied or waiting: which agent, the payee, the amount, the category or invoice reference, the agent's reasoning, the result and reason, every check with its outcome, the budget left, the rules version, and the time.
+- **`decision`**: every payment request, allowed, denied or waiting: which agent, the payee, the amount, the category or invoice reference, the agent's reasoning, the result and reason, every check with its outcome, the budget left, the rules version, and the time. A quoted purchase also carries `requestHash`: `sha256(canonicalJson({ url, method, body }))` of exactly what is sent to the seller, so the URL and any POST body are covered too. The server's own verification checks the stored request still matches it, and the worker refuses to send one that doesn't.
 - **`transition`**: every change of a payment's state afterwards: from and to, the amount, the time, the vault, payment and refund transaction hashes, the reason, and the approval verdict if a person decided.
 
 Entries are append-only: the database itself refuses to update or delete them.

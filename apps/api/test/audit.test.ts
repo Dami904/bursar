@@ -2,10 +2,12 @@ import {
   GENESIS_HASH,
   auditAnchors,
   auditChain,
+  authorizations,
   backfillDecisions,
   decisions,
   entryHash,
   payloadHashOf,
+  requestHashOf,
   transition,
   verifyChain,
 } from "@bursar/db";
@@ -60,6 +62,48 @@ describe("hash-chained audit log (G5)", () => {
       checked: 0,
       problem: { seq: 1, problem: "the decision it records was edited" },
     });
+  });
+
+  it("hashes a purchase's exact request into its decision, and detects the body edited later", async () => {
+    const { agents } = await seedJob();
+    const url = "https://seller.example.com/v1/search";
+    const body = '{"query":"agent budgets"}';
+    const result = await requestSpend(db, agents[0]!.principal, {
+      ...spend("0.10", "op-audit-201"),
+      payment: {
+        url,
+        quote: { paymentRequired: {}, requirements: {}, request: { method: "POST", body } },
+      },
+    });
+    const requestHash = requestHashOf({ url, method: "POST", body });
+    expect(result.decision.requestHash).toBe(requestHash);
+    const [entry] = await entries();
+    expect(entry!.payload).toMatchObject({ requestHash });
+    expect((await verifyChain(db)).ok).toBe(true);
+
+    // Someone with database access swaps the body the worker is about to send.
+    await db
+      .update(authorizations)
+      .set({
+        paymentRequirements: {
+          paymentRequired: {},
+          requirements: {},
+          request: { method: "POST", body: '{"query":"something else"}' },
+        },
+      })
+      .where(eq(authorizations.decisionId, result.decision.id));
+    expect(await verifyChain(db)).toMatchObject({
+      ok: false,
+      problem: { seq: 1, problem: "the request it paid for was edited" },
+    });
+  });
+
+  it("decisions without a request keep the payload they always had", async () => {
+    const { agents } = await seedJob();
+    await requestSpend(db, agents[0]!.principal, spend("0.10", "op-audit-202"));
+    const [entry] = await entries();
+    expect(entry!.payload).not.toHaveProperty("requestHash");
+    expect((await verifyChain(db)).ok).toBe(true);
   });
 
   it("the log itself can't be edited or deleted", async () => {

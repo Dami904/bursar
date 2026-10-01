@@ -87,6 +87,16 @@ export function decisionView(
   };
 }
 
+function requestView(stored: unknown): { method: "GET" | "POST"; body: unknown } {
+  const request = (stored as { request?: { method?: string; body?: string } } | null)?.request;
+  if (request?.method !== "POST") return { method: "GET", body: null };
+  try {
+    return { method: "POST", body: request.body === undefined ? null : JSON.parse(request.body) };
+  } catch {
+    return { method: "POST", body: null };
+  }
+}
+
 export function authorizationView(auth: typeof authorizations.$inferSelect) {
   return {
     id: auth.id,
@@ -95,6 +105,8 @@ export function authorizationView(auth: typeof authorizations.$inferSelect) {
     /** VAULT: released from the vault and paid on-chain. GATEWAY: paid through Circle Gateway. */
     rail: auth.rail,
     paymentUrl: auth.paymentUrl,
+    /** How the resource was requested: GET, or POST with the JSON body the agent sent. */
+    request: requestView(auth.paymentRequirements),
     payTo: auth.payTo,
     vaultTx: auth.vaultTx,
     paymentTx: auth.paymentTx,

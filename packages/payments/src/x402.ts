@@ -32,6 +32,50 @@ export interface Quote {
   readonly payTo: string;
   /** VAULT: an ordinary on-chain x402 payment. GATEWAY: Circle's batched (Nanopayments) scheme. */
   readonly rail: "VAULT" | "GATEWAY";
+  /** The request the quote was for; the paid call repeats it. */
+  readonly request: PaidRequest;
+}
+
+/**
+ * How the resource is requested. Most sellers are a GET; some (search, scraping) take a JSON body
+ * and answer POST. The same request is made for the quote and for the paid call.
+ */
+export interface PaidRequest {
+  readonly method: "GET" | "POST";
+  /** A JSON document, already serialised. Only with POST. */
+  readonly body?: string | undefined;
+}
+
+export const maxRequestBodyBytes = 4_096;
+
+export const GET_REQUEST: PaidRequest = { method: "GET" };
+
+/** Builds a request, or says why it can't be one. The body is whatever JSON the agent supplied. */
+export function paidRequest(method: "GET" | "POST", body: unknown): PaidRequest {
+  if (method === "GET") {
+    if (body !== undefined) throw new QuoteError("A GET request can't carry a body; use POST");
+    return GET_REQUEST;
+  }
+  if (body === undefined) return { method };
+  const text = JSON.stringify(body);
+  if (text === undefined || Buffer.byteLength(text) > maxRequestBodyBytes) {
+    throw new QuoteError(`The request body must be JSON of at most ${maxRequestBodyBytes} bytes`);
+  }
+  return { method, body: text };
+}
+
+function initFor(request: PaidRequest): {
+  method: string;
+  body?: string;
+  headers?: Record<string, string>;
+} {
+  return request.body === undefined
+    ? { method: request.method }
+    : {
+        method: request.method,
+        body: request.body,
+        headers: { "content-type": "application/json" },
+      };
 }
 
 export interface QuoteOptions {
@@ -51,13 +95,17 @@ async function readCapped(response: Response): Promise<string> {
  * Asks a seller what a resource costs, without paying: requests it and reads the 402 challenge.
  * Redirects are refused (a redirect could point at an address the SSRF check never saw).
  */
-export async function quote(url: string, options: QuoteOptions): Promise<Quote> {
+export async function quote(
+  url: string,
+  options: QuoteOptions,
+  request: PaidRequest = GET_REQUEST,
+): Promise<Quote> {
   const safe = await assertFetchable(url, options.allowPrivateHosts);
   let response: Response;
   try {
     response = await fetch(safe, {
       ...publicFetchOptions(options.allowPrivateHosts),
-      method: "GET",
+      ...initFor(request),
       redirect: "manual",
       signal: AbortSignal.timeout(requestTimeoutMs),
     });
@@ -100,11 +148,14 @@ export async function quote(url: string, options: QuoteOptions): Promise<Quote> 
     amount: BigInt(requirements.amount),
     payTo: requirements.payTo,
     rail: isGatewayRequirement(requirements) ? "GATEWAY" : "VAULT",
+    request,
   };
 }
 
 export interface CatalogEntry {
   readonly url: string;
+  /** How to ask for it: GET unless the catalog says POST (the body is up to the agent). */
+  readonly method: "GET" | "POST";
   /** Seller-written: untrusted text. */
   readonly description: string;
 }
@@ -148,7 +199,11 @@ export async function discover(
   if (!Array.isArray(resources)) throw new QuoteError("The seller's catalog has no resources");
   const entries: CatalogEntry[] = [];
   for (const item of resources.slice(0, maxCatalogEntries)) {
-    const { url, description } = (item ?? {}) as { url?: unknown; description?: unknown };
+    const { url, description, method } = (item ?? {}) as {
+      url?: unknown;
+      description?: unknown;
+      method?: unknown;
+    };
     if (typeof url !== "string") continue;
     let resolved: URL;
     try {
@@ -159,6 +214,7 @@ export async function discover(
     if (resolved.origin !== base.origin) continue;
     entries.push({
       url: resolved.toString(),
+      method: method === "POST" ? "POST" : "GET",
       description: typeof description === "string" ? description.slice(0, maxDescriptionChars) : "",
     });
   }
@@ -240,16 +296,17 @@ export type PaymentOutcome =
 export async function sendPayment(
   url: string,
   header: string,
-  options: { readonly allowPrivateHosts?: boolean } = {},
+  options: { readonly allowPrivateHosts?: boolean; readonly request?: PaidRequest } = {},
 ): Promise<PaymentOutcome> {
   let response: Response;
   try {
     // Checked again at connection time: the seller's DNS may have changed since the quote.
+    const init = initFor(options.request ?? GET_REQUEST);
     response = await fetch(url, {
       ...publicFetchOptions(options.allowPrivateHosts === true),
-      method: "GET",
+      ...init,
       redirect: "manual",
-      headers: { "PAYMENT-SIGNATURE": header },
+      headers: { ...init.headers, "PAYMENT-SIGNATURE": header },
       signal: AbortSignal.timeout(requestTimeoutMs * 2),
     });
   } catch (error) {

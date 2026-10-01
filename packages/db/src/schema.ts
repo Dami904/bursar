@@ -306,6 +306,12 @@ export const decisions = pgTable(
      * the request is blocked. Not part of the audit payload, so existing entries still verify.
      */
     resourceUrl: text("resource_url"),
+    /**
+     * For quoted purchases: sha256 of exactly what is sent to the seller (URL, method and JSON
+     * body), so the audit log covers it. Null on older decisions, which leaves their entries as
+     * they were.
+     */
+    requestHash: text("request_hash"),
     reasoning: text("reasoning").notNull(),
     result: decisionResultEnum("result").notNull(),
     reason: text("reason"),

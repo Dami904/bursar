@@ -23,6 +23,14 @@ const operationId = z
     "Your own id for this payment (8-128 letters, digits, _ or -). Send the same id again to retry safely: it is never paid twice. Left out, a new one is made.",
   );
 
+const method = z
+  .enum(["GET", "POST"])
+  .optional()
+  .describe("GET by default. Use POST for sellers that take a JSON body, such as search.");
+const body = z
+  .record(z.string(), z.unknown())
+  .optional()
+  .describe("JSON object sent with a POST request (at most 4 KB)");
 const reasoning = z
   .string()
   .min(1)
@@ -128,10 +136,14 @@ export function createServer(bursar: BursarClient, version = "0.1.1"): McpServer
     {
       title: "Get a price",
       description: "Ask an allowed seller the price of a resource without buying it.",
-      inputSchema: { url: z.string().url().describe("Full URL of the resource") },
+      inputSchema: {
+        url: z.string().url().describe("Full URL of the resource"),
+        method,
+        body,
+      },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    ({ url }) => run(() => bursar.quote(url)),
+    ({ url, method, body }) => run(() => bursar.quote(url, { method, body })),
   );
 
   server.registerTool(
@@ -142,6 +154,8 @@ export function createServer(bursar: BursarClient, version = "0.1.1"): McpServer
         "Buy a resource from an allowed x402 seller. Bursar checks the job's rules, pays in USDC on Arc and returns the content. Denied payments come back with the rule that stopped them.",
       inputSchema: {
         url: z.string().url().describe("Full URL of the resource"),
+        method,
+        body,
         max_price: usdc.describe('The most you\'ll pay, e.g. "0.05"'),
         reasoning,
         operation_id: operationId,
@@ -154,6 +168,8 @@ export function createServer(bursar: BursarClient, version = "0.1.1"): McpServer
         const result = await bursar.purchase({
           operationId: id,
           url: args.url,
+          ...(args.method === undefined ? {} : { method: args.method }),
+          ...(args.body === undefined ? {} : { body: args.body }),
           maxPrice: args.max_price,
           reasoning: args.reasoning,
         });

@@ -86,7 +86,7 @@ Bursar only fetches catalogs from allowed origins. If a seller's catalog can't b
 
 ## Quote
 
-`POST /spend/quote`: the price of a resource, without buying. No decision is recorded.
+`POST /spend/quote`: the price of a resource, without buying. No decision is recorded. For a seller that answers `POST`, send `method` and `body` as for a [purchase](#purchase).
 
 ```bash
 curl -X POST $BURSAR_API_URL/spend/quote \
@@ -106,6 +106,8 @@ curl -X POST $BURSAR_API_URL/spend/quote \
 |---|---|---|
 | `operationId` | string | 8–128 letters, digits, `_` or `-`. See [safe retries](#safe-retries-with-operationid). |
 | `url` | string | The resource, on an allowed seller. |
+| `method` | string, optional | `GET` (the default) or `POST`. Some sellers, such as search and scraping APIs, take a JSON body and answer `POST`. |
+| `body` | object, optional | The JSON sent with a `POST`, at most 4 KB. Only with `POST`. The quote, the payment and the decision's evidence all use the same method and body. |
 | `maxPrice` | string | The most you'll pay. A higher quote fails with `PRICE_ABOVE_MAX` before anything is recorded. |
 | `reasoning` | string | Why you're buying it (up to 4,000 characters). Stored with the decision. |
 

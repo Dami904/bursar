@@ -7,6 +7,8 @@ import {
   jobs,
   LedgerError,
   payoutAddress,
+  requestHashOf,
+  storedRequestOf,
   transition,
   type Db,
 } from "@bursar/db";
@@ -18,6 +20,7 @@ import {
   signPayment,
   usdcAbi,
   vaultOpIdFor,
+  type PaidRequest,
   type WalletProvider,
 } from "@bursar/payments";
 import type { AuthorizationState } from "@bursar/policy";
@@ -71,8 +74,27 @@ type Step = "next" | "wait";
 export interface StoredPayment {
   readonly paymentRequired: PaymentRequired;
   readonly requirements: PaymentRequirements;
+  /** How the resource was requested (GET when absent: purchases stored before POST support). */
+  readonly request?: PaidRequest;
   /** The signed x402 header, kept so a retry resends the same payment (same nonce). */
   readonly signedHeader?: string;
+}
+
+/**
+ * The request about to be sent must be the one its decision hashed into the audit log. A stored
+ * URL or body edited since is a bug or tampering: stop, as for an amount that no longer matches.
+ */
+async function assertRequestUnchanged(deps: ExecutorDeps, auth: AuthorizationRow): Promise<void> {
+  const [decision] = await deps.db
+    .select({ requestHash: decisions.requestHash })
+    .from(decisions)
+    .where(eq(decisions.id, auth.decisionId));
+  const stored = storedRequestOf(auth);
+  // Decided before request hashing existed: nothing to compare.
+  if (decision === undefined || decision.requestHash === null || stored === null) return;
+  if (requestHashOf(stored) !== decision.requestHash) {
+    throw new Error("The stored request no longer matches the decision's request hash");
+  }
 }
 
 const inFlight: AuthorizationState[] = ["RESERVED", "RELEASING", "FUNDED_WALLET", "SIGNING"];
@@ -403,8 +425,10 @@ async function pay(deps: ExecutorDeps, auth: AuthorizationRow, logger: Logger): 
     return "wait";
   }
 
+  await assertRequestUnchanged(deps, auth);
   const outcome = await sendPayment(auth.paymentUrl, stored.signedHeader, {
     allowPrivateHosts: deps.allowPrivateHosts === true,
+    ...(stored.request === undefined ? {} : { request: stored.request }),
   });
   switch (outcome.kind) {
     case "PAID": {
@@ -555,8 +579,10 @@ async function payGateway(
     return "wait";
   }
 
+  await assertRequestUnchanged(deps, auth);
   const outcome = await sendPayment(auth.paymentUrl, stored.signedHeader, {
     allowPrivateHosts: deps.allowPrivateHosts === true,
+    ...(stored.request === undefined ? {} : { request: stored.request }),
   });
   switch (outcome.kind) {
     case "PAID": {

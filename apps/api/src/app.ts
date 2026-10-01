@@ -20,6 +20,7 @@ import {
   QuoteError,
   UnsafeUrlError,
   discover,
+  paidRequest,
   quote,
   type CatalogEntry,
   type WalletProvider,
@@ -143,11 +144,28 @@ const invoiceBody = z.object({
   reasoning: z.string().min(1).max(4000),
 });
 
+/** Some sellers (search, scraping) take a JSON body and answer POST. GET is the default. */
+const requestShape = {
+  method: z.enum(["GET", "POST"]).default("GET"),
+  body: z.record(z.string(), z.unknown()).optional(),
+};
+
+/** The request the agent asked for, or a 422 saying why it isn't one. */
+function requested(input: { method: "GET" | "POST"; body?: Record<string, unknown> | undefined }) {
+  try {
+    return paidRequest(input.method, input.body);
+  } catch (error) {
+    if (error instanceof QuoteError) throw new HttpError(422, "QUOTE_FAILED", error.message);
+    throw error;
+  }
+}
+
 const purchaseBody = z.object({
   operationId: z
     .string()
     .regex(/^[A-Za-z0-9_-]{8,128}$/, "8-128 characters: letters, digits, _ or -"),
   url: z.string().url().max(2000),
+  ...requestShape,
   /** The most the agent is willing to pay; the quote must not exceed it. */
   maxPrice: usdcAmount,
   reasoning: z.string().min(1).max(4000),
@@ -774,9 +792,10 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
       return c.json(decisionView(denied.decision, denied.authorization, denied.replayed), 200);
     }
 
+    const request = requested(input);
     let quoted;
     try {
-      quoted = await quote(input.url, payments);
+      quoted = await quote(input.url, payments, request);
     } catch (error) {
       if (error instanceof UnsafeUrlError || error instanceof QuoteError) {
         throw new HttpError(422, "QUOTE_FAILED", error.message);
@@ -799,7 +818,11 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
       reasoning: input.reasoning,
       payment: {
         url: quoted.url,
-        quote: { paymentRequired: quoted.paymentRequired, requirements: quoted.requirements },
+        quote: {
+          paymentRequired: quoted.paymentRequired,
+          requirements: quoted.requirements,
+          request: quoted.request,
+        },
       },
       rail: quoted.rail,
     });
@@ -845,13 +868,13 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
     const agent = require(c, "AGENT");
     const payments = deps.payments;
     if (payments === undefined) throw badRequest("Purchases aren't enabled on this server");
-    const input = await body(c, z.object({ url: z.string().url().max(2000) }));
+    const input = await body(c, z.object({ url: z.string().url().max(2000), ...requestShape }));
     const { allowed } = await allowListed(agent.jobId, input.url);
     if (!allowed) {
       throw new HttpError(403, "PAYEE_NOT_ALLOWED", "That seller isn't on this job's allow-list");
     }
     try {
-      const q = await quote(input.url, payments);
+      const q = await quote(input.url, payments, requested(input));
       return c.json({
         url: q.url,
         price: formatUsdc(q.amount),

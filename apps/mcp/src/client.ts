@@ -15,13 +15,21 @@ export class BursarError extends Error {
 
 export type Json = Record<string, unknown>;
 
+/** Sellers that take a JSON body (search, scraping) are called with POST. GET is the default. */
+export interface SellerRequest {
+  method?: "GET" | "POST" | undefined;
+  body?: Record<string, unknown> | undefined;
+}
+
 export interface BursarClient {
   budget(): Promise<Json>;
   payees(): Promise<Json>;
-  quote(url: string): Promise<Json>;
+  quote(url: string, request?: SellerRequest): Promise<Json>;
   purchase(input: {
     operationId: string;
     url: string;
+    method?: "GET" | "POST";
+    body?: Record<string, unknown>;
     maxPrice: string;
     reasoning: string;
   }): Promise<Json>;
@@ -62,7 +70,7 @@ export function bursarClient(
   return {
     budget: () => call("GET", "/spend/budget"),
     payees: () => call("GET", "/spend/payees"),
-    quote: (url) => call("POST", "/spend/quote", { url }),
+    quote: (url, request) => call("POST", "/spend/quote", { url, ...request }),
     purchase: (input) => call("POST", "/spend/purchase", input),
     invoice: (input) => call("POST", "/spend/invoice", input),
     authorization: (id) => call("GET", `/spend/authorizations/${encodeURIComponent(id)}`),

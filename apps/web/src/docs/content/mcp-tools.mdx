@@ -63,6 +63,7 @@ The price of one resource, without buying it. Read-only: no decision is recorded
 | Input | Type | |
 |---|---|---|
 | `url` | string | Full URL of the resource, on an allowed seller. |
+| `method`, `body` | optional | As for `purchase`: `POST` with a JSON body for sellers that need one. |
 
 ```json
 {
@@ -80,6 +81,8 @@ Buy a resource from an allowed x402 seller. Bursar quotes it, decides, reserves 
 | Input | Type | |
 |---|---|---|
 | `url` | string | Full URL of the resource. |
+| `method` | `GET` or `POST`, optional | `GET` by default. Use `POST` for sellers that take a JSON body, such as search. `list_sellers` shows each catalog entry's method. |
+| `body` | object, optional | The JSON sent with a `POST`, at most 4 KB. |
 | `max_price` | string | The most the agent will pay, like `"0.20"`. If the seller asks more, nothing happens and the tool returns `PRICE_ABOVE_MAX`. |
 | `reasoning` | string | Why this purchase is worth it. Shown to the owner next to the payment and stored in the audit log. |
 | `operation_id` | string, optional | The agent's own id for this payment: 8–128 letters, digits, `_` or `-`. Sending the same id again never pays twice; it returns the original result. Left out, a fresh id is made and returned. |

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { and, asc, desc, gt, inArray, lte, sql } from "drizzle-orm";
 import type { Db, Tx } from "./client.js";
-import { auditChain, decisions } from "./schema.js";
+import { auditChain, authorizations, decisions } from "./schema.js";
 
 /**
  * The hash-chained audit log (PLAN.md G5).
@@ -56,6 +56,34 @@ export function entryHash(prevHash: string, seq: number, payloadHash: string): s
   );
 }
 
+/** What a purchase sends to its seller: the URL, and for a POST, the JSON body. */
+export interface SellerRequestRecord {
+  readonly url: string;
+  readonly method?: string | undefined;
+  readonly body?: string | undefined;
+}
+
+/** The hash a quoted purchase's decision carries, so the log covers the exact request paid for. */
+export function requestHashOf(request: SellerRequestRecord): string {
+  return payloadHashOf({
+    url: request.url,
+    method: request.method ?? "GET",
+    body: request.body ?? null,
+  });
+}
+
+/** The request a stored authorization will send: its URL plus the request kept with the quote. */
+export function storedRequestOf(auth: {
+  paymentUrl: string | null;
+  paymentRequirements: unknown;
+}): SellerRequestRecord | null {
+  if (auth.paymentUrl === null) return null;
+  const request = (
+    auth.paymentRequirements as { request?: { method?: string; body?: string } } | null
+  )?.request;
+  return { url: auth.paymentUrl, method: request?.method, body: request?.body };
+}
+
 /** What a decision contributes to the log. Rebuilt from the row when verifying, so edits show. */
 export function decisionPayload(d: DecisionRow) {
   return {
@@ -74,6 +102,9 @@ export function decisionPayload(d: DecisionRow) {
     checks: d.checks,
     remainingAtDecision: d.remainingAtDecision,
     policyVersion: d.policyVersion,
+    // Only on decisions made since it existed: left out (not null) otherwise, so older entries
+    // rebuild to exactly what was hashed.
+    requestHash: d.requestHash ?? undefined,
     createdAt: d.createdAt,
   };
 }
@@ -159,6 +190,20 @@ export async function verifyChain(db: Db, upTo?: number): Promise<ChainCheck> {
         ? []
         : await db.select().from(decisions).where(inArray(decisions.id, decisionIds));
     const byId = new Map(rows.map((d) => [d.id, d]));
+    // A purchase's stored request must still be the one its decision hashed.
+    const hashed = rows.filter((d) => d.requestHash !== null).map((d) => d.id);
+    const auths =
+      hashed.length === 0
+        ? []
+        : await db
+            .select({
+              decisionId: authorizations.decisionId,
+              paymentUrl: authorizations.paymentUrl,
+              paymentRequirements: authorizations.paymentRequirements,
+            })
+            .from(authorizations)
+            .where(inArray(authorizations.decisionId, hashed));
+    const authByDecision = new Map(auths.map((a) => [a.decisionId, a]));
     for (const entry of batch) {
       if (entry.seq !== expectedSeq) return fail(expectedSeq, "an entry is missing");
       if (entry.prevHash !== prev) return fail(entry.seq, "it doesn't link to the entry before");
@@ -172,6 +217,15 @@ export async function verifyChain(db: Db, upTo?: number): Promise<ChainCheck> {
         if (row === undefined) return fail(entry.seq, "the decision it records was deleted");
         if (payloadHashOf(JSON.parse(canonicalJson(decisionPayload(row)))) !== payloadHash) {
           return fail(entry.seq, "the decision it records was edited");
+        }
+        const auth = authByDecision.get(row.id);
+        const stored = auth === undefined ? null : storedRequestOf(auth);
+        if (
+          row.requestHash !== null &&
+          stored !== null &&
+          requestHashOf(stored) !== row.requestHash
+        ) {
+          return fail(entry.seq, "the request it paid for was edited");
         }
       }
       prev = entry.hash;

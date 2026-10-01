@@ -116,23 +116,48 @@ export function createSellerApp(env: SellerEnv) {
     },
   ] as const;
 
+  /** Resources that take a JSON body, so the agent POSTs: Bursar quotes and pays them the same way. */
+  const postProducts = [
+    {
+      path: "/v1/shot-list",
+      units: "30000",
+      description: 'A shot list for a scene you describe. POST {"scene": "..."}',
+      body: (input: { scene?: unknown }) => {
+        const scene = typeof input.scene === "string" ? input.scene.slice(0, 200) : "the scene";
+        return {
+          scene,
+          shots: [
+            `1. Wide establishing shot: ${scene}`,
+            "2. Medium shot on the main subject, slow push-in.",
+            "3. Close-up detail that carries the idea.",
+          ],
+        };
+      },
+    },
+  ] as const;
+
   function pick<T>(items: readonly T[]): T {
     return items[Math.floor(Math.random() * items.length)] as T;
   }
 
   const app = new Hono()
     // A storefront for people who open the address in a browser. Agents use the catalog below.
-    .get("/", (c) => c.html(storefront([...products, ...nanoProducts], seller.address)))
+    .get("/", (c) =>
+      c.html(storefront([...products, ...nanoProducts], postProducts, seller.address)),
+    )
     .get("/health", (c) => c.json({ status: "ok", payTo: seller.address, network }))
     // The catalog agents read to learn what's for sale (prices come from each URL's 402 quote).
     .get("/.well-known/x402", (c) =>
       c.json({
         x402Version: 2,
-        resources: [...products, ...nanoProducts].map((p) => ({
-          url: p.path,
-          method: "GET",
-          description: p.description,
-        })),
+        resources: [
+          ...[...products, ...nanoProducts].map((p) => ({
+            url: p.path,
+            method: "GET",
+            description: p.description,
+          })),
+          ...postProducts.map((p) => ({ url: p.path, method: "POST", description: p.description })),
+        ],
       }),
     )
     // A deliberately broken seller for demos and tests: it quotes a price but refuses every
@@ -165,8 +190,11 @@ export function createSellerApp(env: SellerEnv) {
     .use(
       paymentMiddleware(
         Object.fromEntries(
-          products.map((p) => [
-            `GET ${p.path}`,
+          [
+            ...products.map((p) => ({ route: `GET ${p.path}`, p })),
+            ...postProducts.map((p) => ({ route: `POST ${p.path}`, p })),
+          ].map(({ route, p }) => [
+            route,
             {
               accepts: {
                 scheme: "exact",
@@ -205,6 +233,12 @@ export function createSellerApp(env: SellerEnv) {
   for (const product of [...products, ...nanoProducts]) {
     app.get(product.path, (c) => c.json({ ...product.body(), servedAt: new Date().toISOString() }));
   }
+  for (const product of postProducts) {
+    app.post(product.path, async (c) => {
+      const input = (await c.req.json().catch(() => ({}))) as { scene?: unknown };
+      return c.json({ ...product.body(input), servedAt: new Date().toISOString() });
+    });
+  }
   return { app, payTo: seller.address, network };
 }
 
@@ -223,12 +257,16 @@ const formatPrice = (units: string) => {
 /** The human-readable front page: what's for sale, the price, and how agents buy it. */
 function storefront(
   items: readonly { path: string; units: string; description: string }[],
+  postItems: readonly { path: string; units: string; description: string }[],
   payTo: string,
 ): string {
-  const rows = items
+  const rows = [
+    ...items.map((p) => ({ method: "GET", ...p })),
+    ...postItems.map((p) => ({ method: "POST", ...p })),
+  ]
     .map(
       (p) =>
-        `<tr><td><code>GET ${escape(p.path)}</code></td><td>${escape(p.description)}</td><td class="price">${formatPrice(p.units)} USDC</td></tr>`,
+        `<tr><td><code>${p.method} ${escape(p.path)}</code></td><td>${escape(p.description)}</td><td class="price">${formatPrice(p.units)} USDC</td></tr>`,
     )
     .join("");
   return `<!doctype html>

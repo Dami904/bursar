@@ -39,15 +39,23 @@ const fakeWallets: WalletProvider = {
 let server: Server;
 let seller = "";
 let sellerHits = 0;
+/** The method and body of the request the seller saw last. */
+let lastRequest = { method: "", body: "" };
 beforeAll(async () => {
   server = createServer((req, res) => {
     sellerHits += 1;
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    req.on("end", () => {
+      lastRequest = { method: req.method ?? "", body: Buffer.concat(chunks).toString("utf8") };
+    });
     if (req.url === "/.well-known/x402") {
       res.writeHead(200, { "content-type": "application/json" });
       return res.end(
         JSON.stringify({
           resources: [
             { url: "/v1/insight", description: "An insight" },
+            { url: "/v1/search", method: "POST", description: "A search" },
             { url: "https://elsewhere.example/steal", description: "Off-origin: must be dropped" },
           ],
         }),
@@ -131,6 +139,56 @@ describe("POST /spend/purchase", () => {
     expect(stored.requirements.amount).toBe("100000");
     const [decision] = await db.select().from(decisions).where(eq(decisions.jobId, job.id));
     expect(decision!.policyVersion).toBe(0); // seedJob activates without a vault event
+  });
+
+  it("quotes a POST seller with the agent's JSON body and stores the request with the quote", async () => {
+    const { agents, job } = await jobWithSeller();
+    const response = await call("/spend/purchase", agents[0]!.key, {
+      ...purchase("op-buy-000010", "/v1/search"),
+      method: "POST",
+      body: { query: "agent budgets", numResults: 2 },
+    });
+    expect(response.status).toBe(202);
+    expect(response.body.purchase).toMatchObject({
+      state: "RESERVED",
+      request: { method: "POST", body: { query: "agent budgets", numResults: 2 } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(lastRequest).toEqual({
+      method: "POST",
+      body: '{"query":"agent budgets","numResults":2}',
+    });
+    const [auth] = await db.select().from(authorizations).where(eq(authorizations.jobId, job.id));
+    const stored = auth!.paymentRequirements as { request: { method: string; body: string } };
+    expect(stored.request).toEqual({
+      method: "POST",
+      body: '{"query":"agent budgets","numResults":2}',
+    });
+  });
+
+  it("a plain purchase is still a GET, shown as one", async () => {
+    const { agents } = await jobWithSeller();
+    const response = await call("/spend/purchase", agents[0]!.key, purchase("op-buy-000011"));
+    expect(response.body.purchase).toMatchObject({ request: { method: "GET", body: null } });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(lastRequest.method).toBe("GET");
+  });
+
+  it("refuses a GET with a body, and a body that's too large, before contacting the seller", async () => {
+    const { agents, job } = await jobWithSeller();
+    const withBody = await call("/spend/purchase", agents[0]!.key, {
+      ...purchase("op-buy-000012"),
+      body: { query: "x" },
+    });
+    expect(withBody.status).toBe(422);
+    const tooBig = await call("/spend/purchase", agents[0]!.key, {
+      ...purchase("op-buy-000013"),
+      method: "POST",
+      body: { text: "x".repeat(5_000) },
+    });
+    expect(tooBig.status).toBe(422);
+    expect(sellerHits).toBe(0);
+    expect(await db.$count(decisions, eq(decisions.jobId, job.id))).toBe(0);
   });
 
   it("never contacts a seller that isn't allow-listed, and records the refusal", async () => {
@@ -227,7 +285,10 @@ describe("operator endpoints", () => {
     const listed = (response.body.payees as { value: string; catalog: unknown }[]).find(
       (p) => p.value === seller,
     );
-    expect(listed?.catalog).toEqual([{ url: `${seller}/v1/insight`, description: "An insight" }]);
+    expect(listed?.catalog).toEqual([
+      { url: `${seller}/v1/insight`, method: "GET", description: "An insight" },
+      { url: `${seller}/v1/search`, method: "POST", description: "A search" },
+    ]);
   });
 
   it("quotes an allowed seller without deciding or reserving anything", async () => {

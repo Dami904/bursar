@@ -254,8 +254,16 @@ export function localWallets(chain: Chainside): WalletProvider {
 
 export type SellerMode = "normal" | "refuse" | "settle-then-crash";
 
+export interface SeenRequest {
+  readonly method: string | undefined;
+  readonly body: string;
+  readonly paid: boolean;
+}
+
 export interface LocalSeller {
   readonly url: string;
+  /** Every request the seller received, in order: what method and body each one carried. */
+  readonly requests: SeenRequest[];
   mode: SellerMode;
   stop(): void;
 }
@@ -272,9 +280,17 @@ export async function startSeller(
   const facilitator = chain.wallet(accounts.facilitator);
   let url = "";
   const state: { mode: SellerMode } = { mode: "normal" };
+  const requests: SeenRequest[] = [];
   const server: Server = createServer((req, res) => {
     void (async () => {
       const header = req.headers["payment-signature"];
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(chunk as Buffer);
+      requests.push({
+        method: req.method,
+        body: Buffer.concat(chunks).toString("utf8"),
+        paid: typeof header === "string",
+      });
       const requirements = {
         scheme: "exact",
         network: `eip155:${chain.client.chain?.id ?? 31337}` as `${string}:${string}`,
@@ -340,6 +356,7 @@ export async function startSeller(
   url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   return {
     url,
+    requests,
     get mode() {
       return state.mode;
     },
