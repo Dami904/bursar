@@ -49,5 +49,4 @@ Bursar is young. Here is what it doesn't do yet, or does with caveats, so you ca
 
 - **The contracts can't be upgraded**, and the operator address is fixed. If the operator key ever leaked, jobs would be paused and closed (returning funds to owners) and a new vault deployed.
 - **Refund accounting trusts the operator to name the right payment.** The vault checks the money really arrived and never credits more than was released, but can't tell which failed payment returned money came from.
-- **No API rate limiting yet**, beyond each job's own spending window.
 - **The public demo job is public on purpose**: its decisions, reasoning and evidence are open at [/demo](/demo), and its large payments are approved automatically by a demo approver that can approve nothing else.

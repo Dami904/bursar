@@ -52,7 +52,7 @@ Draft from `PLAN.md` §7 and §8.1.6. Checked against the code as each part is b
 
 ## Alerts and automatic runs
 
-- Webhook URLs are the owner's own, but the worker fetches them, so they go through the same SSRF guard as sellers (no private addresses, no redirects, 5-second timeout). Every POST carries an HMAC-SHA256 signature over the timestamp and body.
+- Webhook URLs are the owner's own, but the worker fetches them, so they go through the same SSRF guard as sellers (no private addresses, checked again when the connection is made, no redirects, 5-second timeout). Every POST carries an HMAC-SHA256 signature over the timestamp and body.
 - Telegram links are one-time codes valid for an hour; the bot token never appears in errors or logs.
 - Each automatic operator run gets a fresh agent key that is revoked when the run ends. Revoking the job's "Operator (auto)" agent stops automatic runs.
 
@@ -65,7 +65,7 @@ Draft from `PLAN.md` §7 and §8.1.6. Checked against the code as each part is b
 1. The boundary between the database reservation and the on-chain `release` (crash and retry paths).
 2. Operator key nonce handling under concurrent releases.
 3. Prompt injection through paid-service responses reaching the operator's tools.
-4. SSRF through the `quote` step.
+4. SSRF through the `quote` step (addresses are checked before the request and again when the connection is made, with IPv4-in-IPv6, NAT64 and other internal ranges blocked).
 5. A compromised operator can call `refund` for the wrong operation (it can't create money, but it can mis-attribute returned USDC between a job's operations).
 6. XSS in the console (it would expose the 24-hour session key).
-7. DNS rebinding between the webhook SSRF check and the fetch (same window as for sellers).
+7. DNS rebinding for webhooks and sellers: the connection itself refuses internal addresses, so a name that changes its answer after the check still can't reach one. Worth attacking anyway.

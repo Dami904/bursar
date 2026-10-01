@@ -40,8 +40,6 @@ What Bursar does **not** do yet, stated plainly. Updated as the build progresses
 - **A frozen job must be resumed by hand.** When the vault pays out money Bursar can't match to a payment, the job is frozen in Bursar and paused on-chain. The owner checks what happened, then presses "unfreeze" in the console, which clears it in Bursar and resumes the job on-chain from their wallet.
 - **Approvals are verified server-side for regular wallets only.** The API checks the approver's EIP-712 signature with `verifyTypedData`, which covers ordinary (EOA) wallets. JobVault itself also accepts smart-contract wallets (ERC-1271), but the API would reject such an approver today.
 - Adding another approver (someone other than the owner) still takes the API plus `onchain:approver`; the console sets up only the owner's own wallet as approver. `dev:approve` remains for scripted tests.
-- The SSRF check resolves a seller's hostname before fetching, but the fetch resolves it again (a DNS-rebinding window). The allow-list is checked first, so only owner-approved origins are ever fetched.
-- No rate limiting on the API yet.
 - The x402 seller runs on Circle's keyless trial, which has a per-address allowance.
 
 ## By design (for the hackathon)
