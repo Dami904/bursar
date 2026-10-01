@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { createDb } from "@bursar/db";
+import { parseUsdc } from "@bursar/money";
 import { CircleWalletProvider } from "@bursar/payments";
 import { z } from "zod";
 import { createApp } from "./app.js";
@@ -29,6 +30,11 @@ const env = z
     WEB_ORIGINS: z.string().default("http://localhost:5173"),
     /** The Telegram bot's @username (without @), for alert links. */
     TELEGRAM_BOT_USERNAME: z.string().min(1).optional(),
+    /** Arc mainnet while it's new: the most any one job may spend, in USDC (e.g. "5"). */
+    MAX_JOB_BUDGET: z
+      .string()
+      .regex(/^\d+(\.\d{1,6})?$/, "a USDC amount, like 5 or 2.50")
+      .optional(),
     /** The job shown read-only at /demo. */
     DEMO_JOB_ID: z.string().uuid().optional(),
   })
@@ -55,6 +61,7 @@ const app = createApp(db, {
   webOrigins: webOrigins,
   telegramBot: env.TELEGRAM_BOT_USERNAME,
   demoJobId: env.DEMO_JOB_ID,
+  ...(env.MAX_JOB_BUDGET === undefined ? {} : { maxJobBudget: parseUsdc(env.MAX_JOB_BUDGET) }),
   logRequests: true,
   // Render (and its Cloudflare edge) forward the client's address.
   trustProxy: true,

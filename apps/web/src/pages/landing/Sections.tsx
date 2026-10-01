@@ -3,6 +3,7 @@ import { ArrowRight, ArrowUpRight } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { api } from "../../lib/api.js";
+import { config } from "../../lib/config.js";
 import { useCountUp, useInView } from "../../lib/motion.js";
 
 /** A tape of decisions, like a stock ticker. */
@@ -298,7 +299,9 @@ export function Stats() {
           <Stat key={it.label} {...it} start={inView && m !== undefined} />
         ))}
       </div>
-      <p className="mt-8 text-center text-xs text-muted">Live from Arc testnet</p>
+      <p className="mt-8 text-center text-xs text-muted">
+        Live from Arc {config.mainnet ? "mainnet" : "testnet"}
+      </p>
     </section>
   );
 }

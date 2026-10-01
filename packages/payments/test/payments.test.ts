@@ -6,6 +6,7 @@ import { recoverTypedDataAddress, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  GATEWAY_NETWORKS,
   QuoteError,
   UnsafeUrlError,
   maxRequestBodyBytes,
@@ -274,6 +275,17 @@ describe("quote", () => {
     await expect(
       quote(`${base}/insight`, { ...options, allowPrivateHosts: false }),
     ).rejects.toThrow(UnsafeUrlError);
+  });
+});
+
+describe("Arc mainnet", () => {
+  it("knows Circle Gateway's mainnet contracts and API", () => {
+    expect(GATEWAY_NETWORKS["eip155:5042"]).toEqual({
+      gatewayWallet: "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE",
+      gatewayMinter: "0x2222222d7164433c4C09B0b0D809a9b52C04C205",
+      domain: 26,
+      apiUrl: "https://gateway-api.circle.com/v1",
+    });
   });
 });
 

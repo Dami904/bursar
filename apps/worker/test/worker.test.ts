@@ -22,7 +22,7 @@ import {
   type PaidRequest,
 } from "@bursar/payments";
 import { sql, eq } from "drizzle-orm";
-import type { Hex } from "viem";
+import { parseAbi, type Hex } from "viem";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 // The API's own services create the job and make the decision, exactly as HTTP requests would.
 import type { AgentPrincipal } from "../../api/src/auth/principal.js";
@@ -219,6 +219,34 @@ describe("indexer", () => {
     await db.execute(sql`DELETE FROM chain_cursors`); // re-read every block from scratch
     await index();
     expect((await jobRow(job.id)).deposited).toBe(parseUsdc("1.00"));
+  });
+});
+
+describe("budget cap (mainnet, while it's new)", () => {
+  it("counts an on-chain budget only up to the cap, and follows it below the cap", async () => {
+    const { job } = await liveJob();
+    const owner = chain.wallet(accounts.owner);
+    const setBudget = async (budget: bigint) => {
+      const hash = await owner.writeContract({
+        address: chain.vault,
+        // The owner's own call: Bursar never makes it, so its ABI lives here.
+        abi: parseAbi(["function setBudget(bytes32 jobId, uint128 budget)"]),
+        functionName: "setBudget",
+        args: [job.vaultJobId as Hex, budget],
+      });
+      await chain.client.waitForTransactionReceipt({ hash });
+      await indexOnce({
+        db,
+        client: chain.client,
+        vault: chain.vault,
+        deployBlock: chain.deployBlock,
+        maxJobBudget: parseUsdc("2.00"),
+      });
+    };
+    await setBudget(parseUsdc("50.00"));
+    expect((await jobRow(job.id)).budget).toBe(parseUsdc("2.00"));
+    await setBudget(parseUsdc("1.50"));
+    expect((await jobRow(job.id)).budget).toBe(parseUsdc("1.50"));
   });
 });
 

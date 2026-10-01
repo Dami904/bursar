@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Bell, LogOut, Moon, Sun } from "lucide-react";
 import { NavLink, Outlet } from "react-router";
 import { api, type PendingApproval } from "../lib/api.js";
+import { config } from "../lib/config.js";
 import { shortAddress } from "../lib/format.js";
 import { useLiveUpdates } from "../lib/live.js";
 import { useSession } from "../lib/session.js";
@@ -33,6 +34,7 @@ export function Shell() {
           >
             <Logo /> Bursar
           </NavLink>
+          <NetworkBadge />
           <nav className="flex items-center gap-1">
             {owner && (
               <NavLink to="/app/jobs" className={navClass}>
@@ -89,5 +91,24 @@ export function Shell() {
       </header>
       <Outlet />
     </div>
+  );
+}
+
+/** Which Arc network this console spends on. On mainnet it says so loudly: the USDC is real. */
+function NetworkBadge() {
+  return config.mainnet ? (
+    <span
+      title="Arc mainnet: payments move real USDC"
+      className="rounded-full bg-needs px-2 py-0.5 text-[11px] font-medium whitespace-nowrap text-on-accent"
+    >
+      Mainnet
+    </span>
+  ) : (
+    <span
+      title="Arc testnet: test USDC with no value"
+      className="hidden rounded-full border border-line px-2 py-0.5 text-[11px] whitespace-nowrap text-muted sm:inline"
+    >
+      Testnet
+    </span>
   );
 }

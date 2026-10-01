@@ -28,6 +28,13 @@ export const GATEWAY_NETWORKS: Record<string, GatewayNetwork> = {
     domain: 26,
     apiUrl: "https://gateway-api-testnet.circle.com/v1",
   },
+  // Arc mainnet: addresses from Circle's Gateway docs, confirmed against GET /v1/info.
+  "eip155:5042": {
+    gatewayWallet: "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE",
+    gatewayMinter: "0x2222222d7164433c4C09B0b0D809a9b52C04C205",
+    domain: 26,
+    apiUrl: "https://gateway-api.circle.com/v1",
+  },
 };
 
 /** Adds a Gateway deployment Bursar should pay through: a local chain with a stand-in API, say. */

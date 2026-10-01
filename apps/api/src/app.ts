@@ -198,6 +198,8 @@ export interface ApiDeps {
    * job still needs its owner's key. It's our own business's job, so its data is ours to show.
    */
   readonly demoJobId?: string | undefined;
+  /** The most any one job may have as its budget (mainnet, while it's new). No cap when unset. */
+  readonly maxJobBudget?: bigint;
   /** One JSON line per request (method, path, status, time). Off in tests. */
   readonly logRequests?: boolean;
   /** Request limits; false turns them off. Default: DEFAULT_RATE_LIMITS. */
@@ -551,7 +553,15 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
   // ----- Owner routes -----
   app.post("/jobs", async (c) => {
     const owner = require(c, "OWNER");
-    const job = await createJob(db, owner.ownerId, await body(c, createJobBody), deps.wallets);
+    const input = await body(c, createJobBody);
+    if (deps.maxJobBudget !== undefined && input.budget > deps.maxJobBudget) {
+      throw new HttpError(
+        422,
+        "BUDGET_ABOVE_CAP",
+        `A job's budget can be at most ${formatUsdc(deps.maxJobBudget)} USDC on this server`,
+      );
+    }
+    const job = await createJob(db, owner.ownerId, input, deps.wallets);
     return c.json(jobView(job), 201);
   });
 

@@ -23,6 +23,11 @@ export interface IndexerDeps {
   readonly client: PublicClient;
   readonly vault: Hex;
   readonly deployBlock: bigint;
+  /**
+   * The most any one job may spend (mainnet, while it's new). An owner can raise a budget on-chain
+   * past it; Bursar then counts only up to the cap, and the rest goes back to them at close.
+   */
+  readonly maxJobBudget?: bigint | undefined;
 }
 
 type Decoded = { eventName: string; args: Record<string, unknown> };
@@ -36,7 +41,8 @@ const bigintParam = (value: bigint) => sql`${value.toString()}::bigint`;
  *
  * Returns the number of blocks it advanced.
  */
-export async function indexOnce({ db, client, vault, deployBlock }: IndexerDeps): Promise<bigint> {
+export async function indexOnce(deps: IndexerDeps): Promise<bigint> {
+  const { db, client, vault, deployBlock } = deps;
   await backfillOwners(db, client, vault);
   const [cursor] = await db.select().from(chainCursors).where(eq(chainCursors.name, CURSOR));
   const from = cursor === undefined ? deployBlock : BigInt(cursor.block) + 1n;
@@ -47,7 +53,7 @@ export async function indexOnce({ db, client, vault, deployBlock }: IndexerDeps)
   const logs = await client.getLogs({ address: vault, fromBlock: from, toBlock: to });
   await db.transaction(async (tx) => {
     for (const entry of logs) {
-      await applyLog(tx, entry);
+      await applyLog(tx, entry, deps.maxJobBudget);
     }
     await tx
       .insert(chainCursors)
@@ -61,7 +67,7 @@ export async function indexOnce({ db, client, vault, deployBlock }: IndexerDeps)
   return to - from + 1n;
 }
 
-async function applyLog(tx: Tx, entry: Log): Promise<void> {
+async function applyLog(tx: Tx, entry: Log, maxJobBudget?: bigint): Promise<void> {
   if (entry.transactionHash === null || entry.logIndex === null || entry.blockNumber === null) {
     return; // pending logs have no position yet
   }
@@ -132,7 +138,15 @@ async function applyLog(tx: Tx, entry: Log): Promise<void> {
     }
     case "BudgetChanged": {
       // Mirror the owner's on-chain budget so off-chain decisions match what the vault will allow.
-      const budget = args.budget as bigint;
+      const onChain = args.budget as bigint;
+      const budget = maxJobBudget !== undefined && onChain > maxJobBudget ? maxJobBudget : onChain;
+      if (budget !== onChain) {
+        log.warn("on-chain budget is above the cap; counting only up to the cap", {
+          jobId: job.id,
+          onChain,
+          cap: maxJobBudget,
+        });
+      }
       const committed = committedOf(job);
       if (budget < committed) {
         log.warn("on-chain budget is below what's already committed; keeping the higher budget", {

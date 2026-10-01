@@ -1,4 +1,5 @@
 import { backfillDecisions, computeMetrics, createDb, jobs, metricsDaily } from "@bursar/db";
+import { parseUsdc } from "@bursar/money";
 import { bursarClient, hasModelKey, providerFromEnv, runOperator } from "@bursar/operator";
 import { CircleWalletProvider } from "@bursar/payments";
 import { createPublicClient, createWalletClient, http, type Hex } from "viem";
@@ -122,6 +123,7 @@ export async function startWorker(env: WorkerEnv): Promise<RunningWorker | null>
             : {}),
         };
 
+  const maxJobBudget = env.MAX_JOB_BUDGET === undefined ? undefined : parseUsdc(env.MAX_JOB_BUDGET);
   let running = true;
   let lastDemoAt = 0;
   const loop = (async () => {
@@ -138,6 +140,7 @@ export async function startWorker(env: WorkerEnv): Promise<RunningWorker | null>
             client,
             vault,
             deployBlock: BigInt(env.JOB_VAULT_DEPLOY_BLOCK),
+            maxJobBudget,
           })) > 0n;
           i += 1
         ) {

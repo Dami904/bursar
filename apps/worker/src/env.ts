@@ -43,6 +43,11 @@ const schema = z.object({
   /** The demo approver's Bursar key (bsr_apr_…) and wallet; both needed to auto-approve. */
   DEMO_APPROVER_KEY: z.string().min(1).optional(),
   DEMO_APPROVER_PRIVATE_KEY: privateKey.optional(),
+  /** Arc mainnet while it's new: the most any one job may spend, in USDC (e.g. "5"). */
+  MAX_JOB_BUDGET: z
+    .string()
+    .regex(/^\d+(\.\d{1,6})?$/, "a USDC amount, like 5 or 2.50")
+    .optional(),
   WORKER_TICK_MS: z.coerce.number().int().min(250).default(2000),
   /** How often to sweep leftover dust out of idle job wallets. */
   WORKER_SWEEP_INTERVAL_MS: z.coerce.number().int().min(1000).default(300_000),

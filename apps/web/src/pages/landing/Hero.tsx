@@ -1,5 +1,6 @@
 import { ArrowRight } from "lucide-react";
 import { Link } from "react-router";
+import { config } from "../../lib/config.js";
 import { useLoop } from "../../lib/motion.js";
 import { Flow } from "./Flow.js";
 import { WaxSeal } from "./WaxSeal.js";
@@ -16,7 +17,8 @@ export function Hero() {
       <div className="relative mx-auto grid max-w-6xl items-center gap-14 px-5 pb-20 pt-16 lg:grid-cols-[1.05fr_1fr] md:pt-24">
         <div>
           <p className="animate-rise mb-5 inline-flex items-center gap-2 rounded-full border border-line bg-surface px-3 py-1 text-xs text-muted">
-            <span className="size-1.5 rounded-full bg-seal" /> Live on Arc testnet
+            <span className="size-1.5 rounded-full bg-seal" /> Live on Arc{" "}
+            {config.mainnet ? "mainnet" : "testnet"}
           </p>
           <h1 className="animate-rise text-5xl font-medium leading-[1.02] tracking-[-0.035em] [animation-delay:80ms] sm:text-6xl">
             Give AI agents{" "}

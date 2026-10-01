@@ -1,3 +1,4 @@
+import { arc, arcTestnet } from "viem/chains";
 import { createConfig, http } from "wagmi";
 import { injected, walletConnect } from "wagmi/connectors";
 import { config } from "./config.js";
@@ -24,7 +25,8 @@ export const wagmiConfig = createConfig({
         ]
       : []),
   ],
-  transports: { [config.chain.id]: http() },
+  // One chain per build (see config.ts); both are listed so either build type-checks.
+  transports: { [arc.id]: http(), [arcTestnet.id]: http() },
 });
 
 declare module "wagmi" {
