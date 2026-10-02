@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import { AgentsSection, PayeesSection, type Payee } from "../components/JobSetup.js";
+import { Results } from "../components/Results.js";
 import { BudgetBar, ErrorLine, Loading } from "../components/ui.js";
-import { api, type Agent, type Decision, type Job } from "../lib/api.js";
+import { api, type Agent, type Decision, type Job, type Run } from "../lib/api.js";
 import { addressUrl, config, txUrl } from "../lib/config.js";
 import { money } from "../lib/format.js";
 import { DecisionRow } from "./Job.js";
@@ -12,6 +13,8 @@ import { SiteHeader } from "./landing/Landing.js";
 
 interface DemoData {
   job: Job;
+  /** Answers from Bursar's AI operator; absent on an API older than this page. */
+  runs?: Run[];
   decisions: Decision[];
   agents: Agent[];
   payees: Payee[];
@@ -91,17 +94,20 @@ function DemoJob({ data }: { data: DemoData }) {
       </div>
 
       <div className="mt-10 grid grid-cols-[minmax(0,1fr)] gap-8 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-        <section>
-          <h2 className="mb-2 text-xs text-muted">Decisions</h2>
-          {decisions.length === 0 && (
-            <p className="border-t border-line py-6 text-sm text-muted">
-              The operator's first run is on its way.
-            </p>
-          )}
-          {decisions.map((d) => (
-            <DecisionRow key={d.id} d={d} evidenceBase="/demo/decisions" />
-          ))}
-        </section>
+        <div className="space-y-8">
+          <Results runs={data.runs ?? []} />
+          <section>
+            <h2 className="mb-2 text-xs text-muted">Decisions</h2>
+            {decisions.length === 0 && (
+              <p className="border-t border-line py-6 text-sm text-muted">
+                The operator's first run is on its way.
+              </p>
+            )}
+            {decisions.map((d) => (
+              <DecisionRow key={d.id} d={d} evidenceBase="/demo/decisions" />
+            ))}
+          </section>
+        </div>
         <div className="space-y-8">
           <section>
             <h2 className="mb-2 text-xs text-muted">Agents</h2>

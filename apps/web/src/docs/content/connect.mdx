@@ -30,6 +30,14 @@ Start Claude Code and run `/mcp`: `bursar` should be listed as connected, with s
 
 This adds the server for you, in this project only. To use the same agent in every project, add `--scope user`.
 
+**On Windows**, PowerShell has no `\` line breaks and swallows a bare `--`, and Claude Code starts `npx` through `cmd /c`. Paste this as one line instead (the console's "Claude Code (Windows)" tab fills it in):
+
+```powershell
+claude mcp add bursar --env BURSAR_AGENT_KEY=bsr_agt_... --env BURSAR_API_URL=https://... '--' cmd /c npx -y bursar-mcp
+```
+
+Then `claude mcp list` should show `bursar` as connected.
+
 ## Cursor
 
 Add Bursar to your MCP settings: **Cursor Settings → MCP → Add new MCP server**, or edit `~/.cursor/mcp.json` directly:

@@ -114,6 +114,20 @@ export type PaymentState =
   | "RELEASED"
   | "REJECTED";
 
+/** One run of Bursar's own AI operator: what it was asked, and its answer. */
+export interface Run {
+  id: string;
+  at: string;
+  outcome: string;
+  /** Written by a model that read seller content: shown as plain text. */
+  summary: string | null;
+  brief: string;
+  steps: number;
+  model: string;
+  /** The AI model's cost in USD. */
+  aiCost: string;
+}
+
 export interface Decision {
   id: string;
   at: string;

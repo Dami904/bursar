@@ -38,7 +38,12 @@ export function CodeBlock({
 
 /** Tabs for connecting an agent: Claude Code, a JSON MCP config, or the plain HTTP API. */
 export function ConnectTabs({ agentKey }: { agentKey: string }) {
-  const [target, setTarget] = useState<ConnectTarget>("claude-code");
+  // Windows needs its own one-line command, so it starts on that tab there.
+  const [target, setTarget] = useState<ConnectTarget>(() =>
+    typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent)
+      ? "claude-code-windows"
+      : "claude-code",
+  );
   return (
     <div>
       <div role="tablist" className="mb-3 flex flex-wrap gap-1">

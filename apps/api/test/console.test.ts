@@ -259,3 +259,39 @@ describe("public demo", () => {
     expect((await createApp(db).request("/demo")).status).toBe(404);
   });
 });
+
+describe("results", () => {
+  it("shows the owner each operator run's answer, newest first, and nobody else", async () => {
+    const { agents, job, ownerKey } = await seedJob();
+    const report = (summary: string) =>
+      call("POST", "/spend/runs", agents[0]!.key, {
+        model: "gemini-test",
+        brief: "Summarise celomind.vercel.app",
+        steps: 4,
+        inputTokens: 1000,
+        outputTokens: 200,
+        costMicros: 3137,
+        outcome: "completed",
+        summary,
+      });
+    expect((await report("First answer")).status).toBe(201);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await report("CeloMind is an AI assistant for the Celo network.");
+
+    const runs = await call("GET", `/jobs/${job.id}/runs`, ownerKey);
+    expect(runs.status).toBe(200);
+    expect(runs.body.runs).toEqual([
+      expect.objectContaining({
+        summary: "CeloMind is an AI assistant for the Celo network.",
+        brief: "Summarise celomind.vercel.app",
+        outcome: "completed",
+        aiCost: "0.0031",
+      }),
+      expect.objectContaining({ summary: "First answer" }),
+    ]);
+
+    const other = await seedJob();
+    expect((await call("GET", `/jobs/${job.id}/runs`, other.ownerKey)).status).toBe(404);
+    expect((await call("GET", `/jobs/${job.id}/runs`, agents[0]!.key)).status).toBe(403);
+  });
+});

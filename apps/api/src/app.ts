@@ -59,6 +59,7 @@ import {
   jobAgents,
   jobDecisions,
   jobPayees,
+  jobRuns,
   listJobs,
   marketplaceFilters,
   ownerFingerprint,
@@ -493,14 +494,16 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
 
   app.get("/demo", async (c) => {
     const job = await demoJob();
-    const [decisionsList, agentsList, payeesList, audit] = await Promise.all([
+    const [decisionsList, agentsList, payeesList, audit, runs] = await Promise.all([
       jobDecisions(db, job.ownerId, job.id),
       jobAgents(db, job.ownerId, job.id),
       jobPayees(db, job.ownerId, job.id),
       auditStatus(db),
+      jobRuns(db, job.ownerId, job.id, 10),
     ]);
     return c.json({
       job: jobView(job),
+      runs,
       decisions: decisionsList,
       agents: agentsList,
       payees: payeesList,
@@ -610,6 +613,12 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
   app.get("/jobs", async (c) => {
     const owner = require(c, "OWNER");
     return c.json({ jobs: await listJobs(db, owner.ownerId) });
+  });
+
+  /** What the AI operator produced for this job: each run's answer, newest first. */
+  app.get("/jobs/:id/runs", async (c) => {
+    const owner = require(c, "OWNER");
+    return c.json({ runs: await jobRuns(db, owner.ownerId, c.req.param("id")) });
   });
 
   app.get("/jobs/:id/decisions", async (c) => {

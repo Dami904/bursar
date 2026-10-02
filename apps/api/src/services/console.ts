@@ -8,6 +8,7 @@ import {
   authorizations,
   decisions,
   jobs,
+  operatorRuns,
   payees,
   type Db,
 } from "@bursar/db";
@@ -42,6 +43,32 @@ export async function listJobs(db: Db, ownerId: string) {
     ...jobView(j),
     agents: count(agentCounts, j.id),
     needsYou: count(waiting, j.id),
+  }));
+}
+
+/**
+ * What Bursar's own AI operator produced for a job, newest first: each run's answer (its summary
+ * for the owner), the brief it worked from, how it ended and what the model cost. The summary was
+ * written by a model that read seller content: show it as text, never as markup.
+ */
+export async function jobRuns(db: Db, ownerId: string, jobId: string, limit = 20) {
+  const job = await getOwnedJob(db, ownerId, jobId);
+  const rows = await db
+    .select()
+    .from(operatorRuns)
+    .where(eq(operatorRuns.jobId, job.id))
+    .orderBy(desc(operatorRuns.createdAt))
+    .limit(limit);
+  return rows.map((r) => ({
+    id: r.id,
+    at: r.createdAt.toISOString(),
+    outcome: r.outcome,
+    summary: r.summary,
+    brief: r.brief,
+    steps: r.steps,
+    model: r.model,
+    /** The AI model's cost in USD (not USDC paid on-chain). */
+    aiCost: (Number(r.costMicros) / 1_000_000).toFixed(4),
   }));
 }
 

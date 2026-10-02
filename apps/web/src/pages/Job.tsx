@@ -3,6 +3,7 @@ import { ExternalLink } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { JobMenu, JobStatusCard } from "../components/JobActions.js";
+import { Results } from "../components/Results.js";
 import {
   AgentsSection,
   BriefSection,
@@ -25,6 +26,7 @@ import {
   type Decision,
   type Job as JobT,
   type PendingApproval,
+  type Run,
 } from "../lib/api.js";
 import { useApprove } from "../lib/approve.js";
 import { txUrl } from "../lib/config.js";
@@ -38,6 +40,10 @@ export function Job() {
     queryKey: ["features"],
     queryFn: () => api<{ operator: boolean }>("/features"),
     staleTime: 5 * 60_000,
+  });
+  const runs = useQuery({
+    queryKey: ["runs", id],
+    queryFn: () => api<{ runs: Run[] }>(`/jobs/${id}/runs`),
   });
   const decisions = useQuery({
     queryKey: ["decisions", id],
@@ -117,18 +123,21 @@ export function Job() {
       ))}
 
       <div className="mt-8 grid grid-cols-[minmax(0,1fr)] gap-8 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-        <section>
-          <h2 className="mb-2 text-xs text-muted">Decisions</h2>
-          {decisions.isPending && <Loading />}
-          {decisions.data?.decisions.length === 0 && (
-            <p className="border-t border-line py-6 text-sm text-muted">
-              Nothing yet. Decisions show up here as agents spend.
-            </p>
-          )}
-          {decisions.data?.decisions.map((d) => (
-            <DecisionRow key={d.id} d={d} />
-          ))}
-        </section>
+        <div className="space-y-8">
+          <Results runs={runs.data?.runs ?? []} />
+          <section>
+            <h2 className="mb-2 text-xs text-muted">Decisions</h2>
+            {decisions.isPending && <Loading />}
+            {decisions.data?.decisions.length === 0 && (
+              <p className="border-t border-line py-6 text-sm text-muted">
+                Nothing yet. Decisions show up here as agents spend.
+              </p>
+            )}
+            {decisions.data?.decisions.map((d) => (
+              <DecisionRow key={d.id} d={d} />
+            ))}
+          </section>
+        </div>
         <div className="space-y-8">
           <section>
             <h2 className="mb-2 text-xs text-muted">Agents</h2>
