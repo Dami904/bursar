@@ -3,8 +3,10 @@
 Bursar runs on Arc testnet today. This is everything needed for a **separate** mainnet deployment
 that holds real USDC, while the testnet demo and the hackathon links keep working.
 
-Nothing here has been done yet. Steps marked **(you)** move real money, create accounts or handle
-keys, so they're yours to do.
+Live since 2026-10-02: console https://bursarhq-mainnet.vercel.app, API
+https://bursarhq-mainnet-api.onrender.com, JobVault `0xE336a0A6a066336A5EFbb56542880da2EB87Df1B`,
+AuditAnchor `0x9A21AFE726894BAf84e05B9f46ABd902b04B1a5D` (deploy block 23802303). Steps marked
+**(you)** move real money, create accounts or handle keys, so they're yours to do.
 
 ## Facts, checked on 2026-10-01
 
