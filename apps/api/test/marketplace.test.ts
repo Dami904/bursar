@@ -168,6 +168,20 @@ describe("marketplace mode", () => {
     expect(await db.$count(decisions, eq(decisions.jobId, job.id))).toBe(0);
   });
 
+  it("with a per-call limit, a seller charging per item may go above the listed base price, not above the limit", async () => {
+    const { agents } = await jobWithMarket({ maxPrice: "0.15" });
+    listed = [listing("/v1/insight", 50_000n)]; // listed at 0.05; the seller's 402 asks 0.10
+    const allowed = await call("/spend/purchase", agents[0]!.key, buy("op-mkt-000006"));
+    expect(allowed.body).toMatchObject({ result: "ALLOWED", amount: "0.10" });
+
+    const { agents: others } = await jobWithMarket({ maxPrice: "0.08" });
+    listed = [listing("/v1/insight", 50_000n)];
+    const refused = await call("/spend/purchase", others[0]!.key, buy("op-mkt-000007"));
+    expect(refused.status).toBe(422);
+    expect(refused.body).toMatchObject({ error: "PRICE_ABOVE_LISTING" });
+    expect(String(refused.body.message)).toContain("limit of 0.08");
+  });
+
   it("keeps to the owner's filters", async () => {
     const { agents } = await jobWithMarket({ categories: ["Web Search Research"] });
     listed = [listing("/v1/insight", 100_000n)]; // listed as Data Enrichment

@@ -454,9 +454,14 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
         if (error instanceof MarketplaceError) continue;
         throw error;
       }
-      const listing = findListing(listings, url, method, network, filtersOf(row.filters));
+      const filters = filtersOf(row.filters);
+      const listing = findListing(listings, url, method, network, filters);
       if (listing !== null) {
-        return { origin, allowed: true, via: { marketplace: row.value, listing } };
+        return {
+          origin,
+          allowed: true,
+          via: { marketplace: row.value, listing, maxPrice: filters.maxPrice },
+        };
       }
     }
     return { origin, allowed: false, via: null };
@@ -880,14 +885,21 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
         `The seller asks ${formatUsdc(quoted.amount)} USDC, above your max of ${formatUsdc(input.maxPrice)}`,
       );
     }
-    // Allowed through a marketplace: never pay more than the price it lists.
-    if (via !== null && quoted.amount > via.listing.price) {
-      const name = MARKETPLACES[via.marketplace]?.name ?? via.marketplace;
-      throw new HttpError(
-        422,
-        "PRICE_ABOVE_LISTING",
-        `The seller asks ${formatUsdc(quoted.amount)} USDC; ${name} lists it at ${formatUsdc(via.listing.price)}`,
-      );
+    // Allowed through a marketplace: never above the owner's per-call limit, or, without one, the
+    // price the marketplace lists. (A listing shows a base price; a seller may charge per item,
+    // like per URL fetched, so the owner's limit is the ceiling when there is one.)
+    if (via !== null) {
+      const ceiling = via.maxPrice ?? via.listing.price;
+      if (quoted.amount > ceiling) {
+        const name = MARKETPLACES[via.marketplace]?.name ?? via.marketplace;
+        throw new HttpError(
+          422,
+          "PRICE_ABOVE_LISTING",
+          via.maxPrice === undefined
+            ? `The seller asks ${formatUsdc(quoted.amount)} USDC; ${name} lists it at ${formatUsdc(via.listing.price)}`
+            : `The seller asks ${formatUsdc(quoted.amount)} USDC, above this job's limit of ${formatUsdc(via.maxPrice)} per marketplace call`,
+        );
+      }
     }
 
     const result = await requestSpend(db, agent, {

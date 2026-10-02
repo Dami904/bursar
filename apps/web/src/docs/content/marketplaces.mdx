@@ -26,7 +26,7 @@ A purchase through a marketplace is allowed only when all of these hold:
 
 - the URL matches an endpoint the marketplace lists (same host, a path that fits the listing, the same method), for this job's network;
 - it's within your filters;
-- the seller's own 402 quote is **no higher than the listed price** (`PRICE_ABOVE_LISTING` otherwise);
+- the seller's own 402 quote is no higher than **your per-call limit** on the marketplace entry, or, if you set none, **the price the marketplace lists** (`PRICE_ABOVE_LISTING` otherwise). A listing shows a base price and some sellers charge per item (Exa's `/contents` is priced per URL fetched), which is why your limit, when you set one, is the ceiling;
 - and every rule a named seller would face passes too: budget, per-payment cap, agent limits, category limits, the rate limit and approvals.
 
 The decision records the real seller as the payee and `payeeSource: "marketplace:circle-agents"`, so the evidence page and the audit log say exactly how it was allowed.

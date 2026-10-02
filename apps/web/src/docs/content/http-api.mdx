@@ -27,7 +27,7 @@ Errors have a status code and a JSON body with a stable `error` code and a human
 | 409 | `DELEGATION_NOT_ALLOWED`, `DELEGATION_TOO_DEEP`, `AGENT_REVOKED`, `ALREADY_REPLACED` | Helper and replacement rules; see [Helpers](#helpers). |
 | 422 | `QUOTE_FAILED` | The seller didn't answer with a valid x402 price, or couldn't be reached. |
 | 422 | `PRICE_ABOVE_MAX` | The seller's price is higher than the `maxPrice` you sent. Nothing was recorded. |
-| 422 | `PRICE_ABOVE_LISTING` | Through a [marketplace](/docs/marketplaces): the seller asks more than the marketplace lists. Nothing was recorded. |
+| 422 | `PRICE_ABOVE_LISTING` | Through a [marketplace](/docs/marketplaces): the seller asks more than the owner's per-call limit (or, with none, the listed price). Nothing was recorded. |
 | 404 | `NO_MARKETPLACE` | `GET /spend/marketplace` on a job with no marketplace on its list. |
 | 429 | `RATE_LIMITED` | Too many requests. Wait the number of seconds in the `Retry-After` header, then try again. See [Rate limits](#rate-limits). |
 

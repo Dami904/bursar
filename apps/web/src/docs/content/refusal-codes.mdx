@@ -51,7 +51,7 @@ Some requests fail before a decision is made, so nothing is recorded:
 | Code | When |
 |---|---|
 | `PRICE_ABOVE_MAX` | The seller's quote is above the agent's `maxPrice`. |
-| `PRICE_ABOVE_LISTING` | Bought through a [marketplace](/docs/marketplaces), and the seller's quote is above the price the marketplace lists. |
+| `PRICE_ABOVE_LISTING` | Bought through a [marketplace](/docs/marketplaces), and the seller's quote is above the owner's per-call limit (or, with no limit set, the price the marketplace lists). |
 | `QUOTE_FAILED` | The seller didn't return a valid x402 price. |
 | `BAD_REQUEST` | A field is missing or malformed, for example an `operationId` shorter than 8 characters. |
 | `UNAUTHORIZED` | The key is unknown, revoked or replaced. |
