@@ -252,7 +252,7 @@ export function localWallets(chain: Chainside): WalletProvider {
   };
 }
 
-export type SellerMode = "normal" | "refuse" | "settle-then-crash";
+export type SellerMode = "normal" | "refuse" | "settle-then-crash" | "drop";
 
 export interface SeenRequest {
   readonly method: string | undefined;
@@ -282,6 +282,11 @@ export async function startSeller(
   const state: { mode: SellerMode } = { mode: "normal" };
   const requests: SeenRequest[] = [];
   const server: Server = createServer((req, res) => {
+    // "drop": the connection dies before anything is read, as if the seller were down.
+    if (state.mode === "drop") {
+      req.socket.destroy();
+      return;
+    }
     void (async () => {
       const header = req.headers["payment-signature"];
       const chunks: Buffer[] = [];

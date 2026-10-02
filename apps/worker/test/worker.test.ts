@@ -494,13 +494,10 @@ describe("closing the loop", () => {
     const { principal } = await liveJob();
     const auth = await purchase(principal, "op-signed-000001");
     const sellerBefore = await chain.balanceOf(accounts.seller.address);
-    const realUrl = auth.paymentUrl!;
-    // Nothing answers at this URL: the payment is signed and saved, but never reaches the seller,
-    // exactly as if the worker died between saving the signature and sending it.
-    await db
-      .update(authorizations)
-      .set({ paymentUrl: "http://127.0.0.1:1/insight" })
-      .where(eq(authorizations.id, auth.id));
+    // The seller is down: the payment is signed and saved, but never reaches it, exactly as if the
+    // worker died between saving the signature and sending it. (The stored URL stays as decided:
+    // editing it would rightly be refused as a changed request.)
+    seller.mode = "drop";
     await runUntil(auth.id, ["SIGNING"]);
     await executeOnce(deps);
     const signed = await stateOf(auth.id);
@@ -509,9 +506,10 @@ describe("closing the loop", () => {
     const header = (signed.paymentRequirements as { signedHeader: string }).signedHeader;
 
     // "Restart": the seller is reachable again.
+    seller.mode = "normal";
     await db
       .update(authorizations)
-      .set({ paymentUrl: realUrl, nextAttemptAt: null })
+      .set({ nextAttemptAt: null })
       .where(eq(authorizations.id, auth.id));
     const done = await runUntil(auth.id, ["SETTLED"]);
     expect(done.state).toBe("SETTLED");
