@@ -311,8 +311,12 @@ export type PaymentOutcome =
   | { readonly kind: "PAID"; readonly body: string; readonly settlement: SettleResponse }
   /** The seller positively refused the payment: nothing can have moved. */
   | { readonly kind: "REFUSED"; readonly status: number; readonly body: string }
-  /** No usable answer (timeout, dropped connection, 5xx): money may or may not have moved. */
-  | { readonly kind: "UNKNOWN"; readonly reason: string };
+  /**
+   * No usable answer (timeout, dropped connection, 5xx, or a success without a receipt such as a
+   * 202 "working on it"): money may or may not have moved. `body` is what a 2xx said, if anything:
+   * an asynchronous seller's job id or result link, worth keeping.
+   */
+  | { readonly kind: "UNKNOWN"; readonly reason: string; readonly body?: string };
 
 /** Sends a signed payment. Never throws for network trouble: that's an UNKNOWN outcome. */
 export async function sendPayment(
@@ -346,7 +350,11 @@ export async function sendPayment(
     return { kind: "PAID", body, settlement };
   }
   if (response.status >= 500 || (response.ok && settlement === null)) {
-    return { kind: "UNKNOWN", reason: `HTTP ${response.status} without a settlement receipt` };
+    return {
+      kind: "UNKNOWN",
+      reason: `HTTP ${response.status} without a settlement receipt`,
+      ...(response.ok && body !== "" ? { body } : {}),
+    };
   }
   return { kind: "REFUSED", status: response.status, body };
 }

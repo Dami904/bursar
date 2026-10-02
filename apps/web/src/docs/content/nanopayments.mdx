@@ -38,8 +38,8 @@ On the evidence page, a nanopayment shows **Paid through Circle Gateway** with C
 
 ## When something goes wrong
 
-- **The seller refuses the payment.** Nothing was paid. The amount goes back to the job's Gateway balance, ready for the next purchase.
-- **The seller goes silent after the payment was sent.** Bursar asks Circle. If Circle received it, it's paid. If Circle has no record of it after 10 minutes, the amount goes back to the job's Gateway balance. Holding it longer would protect nothing, because the float was already counted in full.
+- **The seller refuses the payment, goes silent, or answers "working on it" without a receipt.** Once a seller has the signed payment it can still hand it to Circle while the signature is valid (7 days for Gateway), so Bursar doesn't call it unpaid yet. The payment shows as **unresolved** and the amount stays held. Bursar checks Circle's records: the moment Circle has it, it's paid; only once the signature has expired unused does the amount go back to the job's Gateway balance. That way the job's books never say "unpaid" for money that moved.
+- **A seller that works asynchronously** (image, audio or video generation often answers `202` with a job id) has that answer kept with the payment, so where the result will be isn't lost.
 - **The float can't be funded.** If the job's caps or remaining budget are too small to cover the payment, it's returned to the budget with the reason, and nothing leaves the vault.
 
 ## When the job closes

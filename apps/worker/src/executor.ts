@@ -478,6 +478,8 @@ async function pay(deps: ExecutorDeps, auth: AuthorizationRow, logger: Logger): 
           attempts,
           lastError: outcome.reason,
           nextAttemptAt: new Date(Date.now() + RETRY_DELAY_MS),
+          // A "working on it" answer (202) often says where the result will be: keep it.
+          ...(outcome.body === undefined ? {} : { deliverable: outcome.body }),
         });
       }
       return "wait";
@@ -613,16 +615,14 @@ async function payGateway(
       return "wait";
     }
     case "REFUSED":
-      // Gateway never received it. The float was counted against the budget in full, so even if
-      // this signature were used later it couldn't spend past the budget: release it now.
-      await transition(
-        deps.db,
-        auth.id,
-        "RELEASED",
-        {
-          resolvedReason: `The seller refused the Gateway payment (HTTP ${outcome.status}); nothing was paid`,
-        },
-        { expectFrom: "SIGNING" },
+      // A refusal doesn't prove nothing will move: the seller holds the signed payment, valid for
+      // days, and may still hand it to Gateway (a seller that answered "202" and then "already
+      // used" on the resend had kept it). Held until the signature expires; the reconciler
+      // settles it the moment Gateway shows it, and releases it only once it can't be used.
+      await unresolved(
+        deps,
+        auth,
+        `The seller refused the Gateway payment (HTTP ${outcome.status}). Its signed payment stays valid until ${auth.validBefore?.toISOString() ?? "it expires"}, so the money is held until then in case it's submitted late`,
       );
       logger.warn("seller refused gateway payment", {
         status: outcome.status,
@@ -639,6 +639,8 @@ async function payGateway(
           attempts,
           lastError: outcome.reason,
           nextAttemptAt: new Date(Date.now() + RETRY_DELAY_MS),
+          // A "working on it" answer (202) often says where the result will be: keep it.
+          ...(outcome.body === undefined ? {} : { deliverable: outcome.body }),
         });
       }
       return "wait";

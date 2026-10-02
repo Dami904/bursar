@@ -873,11 +873,22 @@ describe("Circle Gateway nano lane", () => {
     expect(done.gatewayTransferId).toBe(gateway.transfers[0]!.id);
   });
 
-  it("gives a refused nano payment back to the float, with nothing paid", async () => {
+  it("holds a refused nano payment until its signature expires, then gives it back to the float", async () => {
     const { job, principal } = await nanoJob();
     const auth = await purchase(principal, "op-nano-refuse-1", gateway);
     gateway.mode = "refuse";
-    const done = await runUntil(auth.id, ["SETTLED", "RELEASED"], tick, 16);
+    const held = await runUntil(auth.id, ["SETTLED", "RELEASED", "UNRESOLVED"], tick, 16);
+    // The seller still holds the signed payment: not released while it could be submitted.
+    expect(held.state).toBe("UNRESOLVED");
+    await reconcile();
+    expect((await stateOf(auth.id)).state).toBe("UNRESOLVED");
+
+    await db
+      .update(authorizations)
+      .set({ validBefore: new Date(Date.now() - 60_000) })
+      .where(eq(authorizations.id, auth.id));
+    await reconcile();
+    const done = await stateOf(auth.id);
     expect(done.state).toBe("RELEASED");
     expect(gateway.transfers).toHaveLength(0);
     const row = await jobRow(job.id);
@@ -969,9 +980,17 @@ describe("Circle Gateway nano lane", () => {
     expect((await stateOf(late.id)).gatewayTransferId).toBe("late-transfer");
     expect((await stateOf(lost.id)).state).toBe("UNRESOLVED"); // Gateway may still receive it
 
+    // Ten minutes isn't enough: the signature is still valid, so it could still arrive.
     await db
       .update(authorizations)
       .set({ updatedAt: new Date(Date.now() - 11 * 60_000) })
+      .where(eq(authorizations.id, lost.id));
+    await reconcile();
+    expect((await stateOf(lost.id)).state).toBe("UNRESOLVED");
+    // Once it has expired unused, it goes back to the float.
+    await db
+      .update(authorizations)
+      .set({ validBefore: new Date(Date.now() - 60_000) })
       .where(eq(authorizations.id, lost.id));
     await reconcile();
     expect((await stateOf(lost.id)).state).toBe("RELEASED");

@@ -44,7 +44,7 @@ const DEFAULT_APPROVAL_TTL_MS = 2 * 60 * 60 * 1000;
 /** 0.01 USDC in Arc's 18-decimal native units: far above an ERC-20 transfer's fee. */
 const DEFAULT_GAS_BUFFER = 10n ** 16n;
 const DEFAULT_EXPIRY_GRACE_MS = 15_000;
-/** A Gateway payment Gateway still hasn't seen after this long goes back to the float. */
+/** Without a recorded expiry, how long a Gateway payment Gateway hasn't seen is held. */
 const GATEWAY_UNKNOWN_MS = 10 * 60_000;
 const STUCK_RELEASE_MS = 2 * 60 * 1000;
 const DEFAULT_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
@@ -213,11 +213,10 @@ async function resolve(deps: ReconcilerDeps, auth: AuthorizationRow, logger: Log
 }
 
 /**
- * A Gateway payment whose outcome we didn't hear. Circle Gateway is the source of truth: if it
- * received the signed payment, it's paid. If Gateway still has no record after a while, it goes
- * back to the job's float. Gateway signatures stay valid for days, but the float was counted
- * against the budget in full when it left the vault, so even a late submission can't spend past
- * the budget: holding the money for days would protect nothing.
+ * A Gateway payment whose outcome we didn't hear, or that a seller refused after holding it.
+ * Circle Gateway is the source of truth: if it received the signed payment, it's paid. It goes
+ * back to the job's float only once the signature has expired, because until then the seller can
+ * still submit it, and releasing early would leave the books saying "unpaid" for money that moved.
  */
 async function resolveGateway(deps: ReconcilerDeps, auth: AuthorizationRow, logger: Logger) {
   if (auth.payer === null || auth.paymentNonce === null) return;
@@ -236,7 +235,11 @@ async function resolveGateway(deps: ReconcilerDeps, auth: AuthorizationRow, logg
     logger.info("unresolved Gateway payment turned out received", { transferId: transfer.id });
     return;
   }
-  if (Date.now() - auth.updatedAt.getTime() < GATEWAY_UNKNOWN_MS) return;
+  const usableUntil =
+    auth.validBefore === null
+      ? auth.updatedAt.getTime() + GATEWAY_UNKNOWN_MS
+      : auth.validBefore.getTime() + (deps.expiryGraceMs ?? DEFAULT_EXPIRY_GRACE_MS);
+  if (Date.now() < usableUntil) return;
   await transition(
     deps.db,
     auth.id,

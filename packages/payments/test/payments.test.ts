@@ -185,6 +185,16 @@ beforeAll(async () => {
         }, 400);
         return;
       }
+      case "/accepted":
+        // An asynchronous seller: takes the payment, answers "working on it", no receipt yet.
+        if (!paid) {
+          res.writeHead(402, {
+            "PAYMENT-REQUIRED": encodePaymentRequiredHeader(paymentRequired()),
+          });
+          return res.end("{}");
+        }
+        res.writeHead(202, { "content-type": "application/json" });
+        return res.end('{"id":"job-42","status":"processing"}');
       case "/free":
         res.writeHead(200);
         return res.end("free");
@@ -484,6 +494,14 @@ describe("sendPayment: three outcomes, never two", () => {
 
   it("UNKNOWN when the seller takes longer than the wait: money may have moved", async () => {
     expect((await sendPayment(`${base}/slow`, "e30=", { timeoutMs: 100 })).kind).toBe("UNKNOWN");
+  });
+
+  it("UNKNOWN for a 202 without a receipt, keeping what it said (the job id)", async () => {
+    expect(await sendPayment(`${base}/accepted`, "e30=")).toEqual({
+      kind: "UNKNOWN",
+      reason: "HTTP 202 without a settlement receipt",
+      body: '{"id":"job-42","status":"processing"}',
+    });
   });
 
   it("UNKNOWN when nothing answers", async () => {
