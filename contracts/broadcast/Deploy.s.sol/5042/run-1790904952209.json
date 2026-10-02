@@ -30,9 +30,7 @@
       "contractAddress": "0x9a21afe726894baf84e05b9f46abd902b04b1a5d",
       "function": null,
       "functionAbi": null,
-      "arguments": [
-        "0x81f0eAb6be6377DAC295d4C426056c13e587f84a"
-      ],
+      "arguments": ["0x81f0eAb6be6377DAC295d4C426056c13e587f84a"],
       "transaction": {
         "from": "0x38fddae57718930f71f30703016c1ea97500f932",
         "to": null,
