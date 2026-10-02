@@ -16,6 +16,12 @@ import { GATEWAY_NETWORKS, isGatewayRequirement } from "./gateway.js";
 import { assertFetchable, publicFetchOptions } from "./ssrf.js";
 
 const requestTimeoutMs = 15_000;
+/**
+ * How long a paid call may take. The seller does its work before answering: text in about a
+ * second, but generating an image or audio can take a minute. Waiting longer is safe: a retry
+ * resends the same signed payment, which a seller can't charge twice.
+ */
+export const PAID_CALL_TIMEOUT_MS = 120_000;
 /** Paid responses returned to agents are capped; nobody needs a megabyte in a decision log. */
 const maxBodyBytes = 64 * 1024;
 
@@ -312,7 +318,12 @@ export type PaymentOutcome =
 export async function sendPayment(
   url: string,
   header: string,
-  options: { readonly allowPrivateHosts?: boolean; readonly request?: PaidRequest } = {},
+  options: {
+    readonly allowPrivateHosts?: boolean;
+    readonly request?: PaidRequest;
+    /** How long to wait for the seller's answer. Default PAID_CALL_TIMEOUT_MS. */
+    readonly timeoutMs?: number;
+  } = {},
 ): Promise<PaymentOutcome> {
   let response: Response;
   try {
@@ -323,7 +334,7 @@ export async function sendPayment(
       ...init,
       redirect: "manual",
       headers: { ...init.headers, "PAYMENT-SIGNATURE": header },
-      signal: AbortSignal.timeout(requestTimeoutMs * 2),
+      signal: AbortSignal.timeout(options.timeoutMs ?? PAID_CALL_TIMEOUT_MS),
     });
   } catch (error) {
     return { kind: "UNKNOWN", reason: `No response from the seller: ${(error as Error).message}` };

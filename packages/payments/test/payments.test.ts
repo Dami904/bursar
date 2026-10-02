@@ -7,6 +7,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   GATEWAY_NETWORKS,
+  PAID_CALL_TIMEOUT_MS,
   QuoteError,
   UnsafeUrlError,
   maxRequestBodyBytes,
@@ -162,6 +163,27 @@ beforeAll(async () => {
           }),
         });
         return res.end("{}");
+      }
+      case "/slow": {
+        // A seller that takes its time, like one generating an image.
+        if (!paid) {
+          res.writeHead(402, {
+            "PAYMENT-REQUIRED": encodePaymentRequiredHeader(paymentRequired()),
+          });
+          return res.end("{}");
+        }
+        setTimeout(() => {
+          res.writeHead(200, {
+            "PAYMENT-RESPONSE": encodePaymentResponseHeader({
+              success: true,
+              transaction: "0xabc",
+              network: NETWORK,
+              payer: account.address,
+            }),
+          });
+          res.end('{"image":"done"}');
+        }, 400);
+        return;
       }
       case "/free":
         res.writeHead(200);
@@ -452,6 +474,16 @@ describe("sendPayment: three outcomes, never two", () => {
 
   it("UNKNOWN on a 5xx: money may have moved", async () => {
     expect((await sendPayment(`${base}/crash`, "e30=")).kind).toBe("UNKNOWN");
+  });
+
+  it("waits for a slow seller well past a page load: a minute or two by default", async () => {
+    expect(PAID_CALL_TIMEOUT_MS).toBeGreaterThanOrEqual(120_000);
+    const outcome = await sendPayment(`${base}/slow`, "e30=", { timeoutMs: 5_000 });
+    expect(outcome).toMatchObject({ kind: "PAID", body: '{"image":"done"}' });
+  });
+
+  it("UNKNOWN when the seller takes longer than the wait: money may have moved", async () => {
+    expect((await sendPayment(`${base}/slow`, "e30=", { timeoutMs: 100 })).kind).toBe("UNKNOWN");
   });
 
   it("UNKNOWN when nothing answers", async () => {
