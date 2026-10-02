@@ -84,7 +84,17 @@ export interface QuoteOptions {
   /** USDC contract address on that network. */
   readonly asset: string;
   readonly allowPrivateHosts: boolean;
+  /**
+   * Below this price (USDC base units), a seller offering both is paid through Circle Gateway:
+   * a plain on-chain payment costs about as much in gas as the item itself. Default 1 cent.
+   */
+  readonly gatewayBelow?: bigint;
 }
+
+/** One cent: under it, gas for a plain on-chain payment rivals the price. */
+export const DEFAULT_GATEWAY_BELOW = 10_000n;
+
+const units = (amount: string): bigint | null => (/^\d+$/.test(amount) ? BigInt(amount) : null);
 
 async function readCapped(response: Response): Promise<string> {
   const text = await response.text();
@@ -130,11 +140,17 @@ export async function quote(
       option.asset.toLowerCase() === options.asset.toLowerCase() &&
       (!isGatewayRequirement(option) || GATEWAY_NETWORKS[option.network] !== undefined),
   );
-  // A plain on-chain payment when the seller offers one (the vault checks each payment itself);
-  // Circle's batched scheme when that's all it takes, which is how sub-cent sellers price.
+  // A plain on-chain payment when the seller offers one (the vault checks each payment itself),
+  // unless the item is cheap and the seller also takes Circle's batched scheme: then one float
+  // pays for many items without gas. Gateway is also what it takes when it's all a seller offers.
+  const plain = usable.find((option) => !isGatewayRequirement(option));
+  const batched = usable.find((option) => isGatewayRequirement(option));
+  const cheap = (option: PaymentRequirements | undefined) => {
+    const amount = option === undefined ? null : units(option.amount);
+    return amount !== null && amount < (options.gatewayBelow ?? DEFAULT_GATEWAY_BELOW);
+  };
   const requirements =
-    usable.find((option) => !isGatewayRequirement(option)) ??
-    usable.find((option) => isGatewayRequirement(option));
+    batched !== undefined && (plain === undefined || cheap(batched)) ? batched : plain;
   if (requirements === undefined) {
     throw new QuoteError(`The seller doesn't accept USDC on ${options.network}`);
   }

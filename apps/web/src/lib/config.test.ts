@@ -17,13 +17,19 @@ describe("which Arc network the console is built for", () => {
     expect(config).toMatchObject({ mainnet: false, explorer: "https://explorer.testnet.arc.io" });
     expect(config.chain.id).toBe(5042002);
     expect(config.vault).toBe("0x5Cd51a31fE931D31574Eadd083A0B5c210CA2cB6");
+    expect(config.otherNetworkUrl).toBeUndefined(); // no switch link until the other site exists
   });
 
   it("is mainnet with chain 5042, its explorer and its own vault", async () => {
     const vault = "0x1111111111111111111111111111111111111111";
-    const config = await load({ VITE_ARC_CHAIN_ID: "5042", VITE_JOB_VAULT_ADDRESS: vault });
+    const config = await load({
+      VITE_ARC_CHAIN_ID: "5042",
+      VITE_JOB_VAULT_ADDRESS: vault,
+      VITE_OTHER_NETWORK_URL: "https://bursarhq.vercel.app",
+    });
     expect(config).toMatchObject({ mainnet: true, explorer: "https://explorer.arc.io", vault });
     expect(config.chain.id).toBe(5042);
+    expect(config.otherNetworkUrl).toBe("https://bursarhq.vercel.app");
   });
 
   it("refuses a mainnet build without a vault address, rather than using testnet's", async () => {

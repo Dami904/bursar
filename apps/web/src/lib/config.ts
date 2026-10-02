@@ -25,6 +25,11 @@ export const config = {
     "0x3600000000000000000000000000000000000000",
   walletConnectProjectId: env.VITE_WALLETCONNECT_PROJECT_ID,
   explorer: mainnet ? "https://explorer.arc.io" : "https://explorer.testnet.arc.io",
+  /**
+   * The same console on the other network (testnet links to mainnet and back), e.g.
+   * https://bursarhq-mainnet.vercel.app. No link until it's set, so it never points at nothing.
+   */
+  otherNetworkUrl: env.VITE_OTHER_NETWORK_URL,
 };
 
 export const txUrl = (hash: string) => `${config.explorer}/tx/${hash}`;

@@ -25,9 +25,11 @@ Proven: Bursar's x402 client paid a real mainnet seller (Exa, $0.001, POST) on 2
 
 ## Decisions first (you)
 
-- [ ] **Budget cap.** The most any one job may hold. Suggested: 5 USDC while it's new.
+- [x] **Budget cap: 5 USDC per job** (`MAX_JOB_BUDGET=5`). Decided 2026-10-02.
 - [ ] **Who may create jobs.** Suggested: only you at first, then invited owners.
-- [ ] **Operator funding.** The operator pays gas for releases, refunds and anchors. Suggested: 1 USDC.
+- [x] **Operator funding: 1 USDC.** Decided 2026-10-02. Measured: Bursar's transactions use 71k to
+      94k gas; at mainnet's 20 gwei that's about 0.0015 to 0.002 USDC each, so roughly 300 to 500
+      operator transactions. Payments stall (nothing is lost) if it runs dry.
 - [ ] **Demo.** Suggested: no autopilot demo job on mainnet; keep the demo on testnet.
 
 ## 1. Code changes (done on branch `mainnet-prep`)

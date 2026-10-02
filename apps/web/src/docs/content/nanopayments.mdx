@@ -48,7 +48,7 @@ Closing the job returns what's left in the vault, as always. The unspent float i
 
 ## Selling with nanopayments
 
-Any x402 seller that takes Circle Gateway works. With Circle's `@circle-fin/x402-batching` package, a seller's price is marked as Gateway-only and Bursar pays it through Gateway automatically. If a seller offers both a normal payment and Gateway for the same item, Bursar pays the normal way, straight from the vault.
+Any x402 seller that takes Circle Gateway works. With Circle's `@circle-fin/x402-batching` package, a seller's price is marked as Gateway-only and Bursar pays it through Gateway automatically. If a seller offers both a normal payment and Gateway for the same item, Bursar picks by price: under one cent it pays through Gateway, because gas for a normal on-chain payment would cost about as much as the item; from one cent up it pays the normal way, straight from the vault.
 
 The demo seller, [Scenestock](https://scenestock.vercel.app), sells sound cues and captions at 0.001 and 0.002 USDC this way.
 

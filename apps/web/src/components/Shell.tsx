@@ -94,8 +94,32 @@ export function Shell() {
   );
 }
 
-/** Which Arc network this console spends on. On mainnet it says so loudly: the USDC is real. */
+/**
+ * Which Arc network this console spends on, and a way to the other one. On mainnet it says so
+ * loudly: the USDC is real. Mainnet and testnet are separate sites with separate sign-ins.
+ */
 function NetworkBadge() {
+  return (
+    <span className="flex items-center gap-2">
+      <NetworkLabel />
+      {config.otherNetworkUrl !== undefined && (
+        <a
+          href={`${config.otherNetworkUrl}/app`}
+          title={
+            config.mainnet
+              ? "Open the testnet console (test USDC)"
+              : "Open the mainnet console (real USDC)"
+          }
+          className="hidden text-[11px] whitespace-nowrap text-muted underline-offset-2 hover:text-ink hover:underline sm:inline"
+        >
+          Switch to {config.mainnet ? "testnet" : "mainnet"}
+        </a>
+      )}
+    </span>
+  );
+}
+
+function NetworkLabel() {
   return config.mainnet ? (
     <span
       title="Arc mainnet: payments move real USDC"

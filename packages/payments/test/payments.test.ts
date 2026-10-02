@@ -152,6 +152,17 @@ beforeAll(async () => {
         });
         return res.end("{}");
       }
+      case "/both-dear": {
+        // Both rails at 2 cents: worth a plain on-chain payment.
+        const both = paymentRequired({ amount: "20000" });
+        res.writeHead(402, {
+          "PAYMENT-REQUIRED": encodePaymentRequiredHeader({
+            ...both,
+            accepts: [{ ...nanoOption, amount: "20000" }, ...both.accepts],
+          }),
+        });
+        return res.end("{}");
+      }
       case "/free":
         res.writeHead(200);
         return res.end("free");
@@ -255,11 +266,23 @@ describe("quote", () => {
     expect(q.amount).toBe(1_000n);
   });
 
-  it("prefers a plain on-chain payment when the seller offers both", async () => {
+  it("pays an item under a cent through Gateway when the seller offers both", async () => {
+    // Gas for a plain on-chain payment would cost about as much as the item.
     const q = await quote(`${base}/both`, options);
+    expect(q.rail).toBe("GATEWAY");
+    expect(q.amount).toBe(1_000n);
+  });
+
+  it("prefers a plain on-chain payment from a cent up, or when that's all a seller takes", async () => {
+    const q = await quote(`${base}/both-dear`, options);
     expect(q.rail).toBe("VAULT");
-    expect(q.amount).toBe(10_000n);
+    expect(q.amount).toBe(20_000n);
     expect((await quote(`${base}/insight`, options)).rail).toBe("VAULT");
+  });
+
+  it("takes the threshold from the options", async () => {
+    const q = await quote(`${base}/both`, { ...options, gatewayBelow: 1_000n });
+    expect(q.rail).toBe("VAULT"); // 0.001 isn't below 0.001
   });
 
   it("refuses a seller that doesn't take USDC on our network", async () => {
