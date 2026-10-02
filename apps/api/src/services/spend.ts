@@ -43,6 +43,12 @@ export interface SpendInput {
   readonly invoiceRef?: string | undefined;
   /** For purchases: the exact URL asked for. */
   readonly resourceUrl?: string | undefined;
+  /**
+   * When the payee isn't on the allow-list by name but through an entry like a marketplace: that
+   * entry's rules (its category) apply, and the decision records how it was allowed.
+   */
+  readonly allowedBy?:
+    { readonly kind: PayeeKind; readonly value: string; readonly source: string } | undefined;
   /** GATEWAY: a sub-cent payment from the job's Gateway balance. Default VAULT. */
   readonly rail?: "VAULT" | "GATEWAY" | undefined;
 }
@@ -103,11 +109,17 @@ export async function requestSpend(
       .select()
       .from(payees)
       .where(
-        and(
-          eq(payees.jobId, job.id),
-          eq(payees.kind, input.payee.kind),
-          eq(payees.value, payeeValue),
-        ),
+        input.allowedBy === undefined
+          ? and(
+              eq(payees.jobId, job.id),
+              eq(payees.kind, input.payee.kind),
+              eq(payees.value, payeeValue),
+            )
+          : and(
+              eq(payees.jobId, job.id),
+              eq(payees.kind, input.allowedBy.kind),
+              eq(payees.value, input.allowedBy.value),
+            ),
       );
     // The category comes from the owner's allow-list entry, never from the agent's request.
     const category = payee?.category ?? null;
@@ -192,6 +204,7 @@ export async function requestSpend(
         invoiceRef: input.invoiceRef ?? null,
         resourceUrl: input.resourceUrl ?? input.payment?.url ?? null,
         requestHash: requestOf === null ? null : requestHashOf(requestOf),
+        payeeSource: input.allowedBy?.source ?? null,
         reasoning: input.reasoning,
         result: outcome.outcome,
         reason: outcome.outcome === "DENIED" ? outcome.reason : null,

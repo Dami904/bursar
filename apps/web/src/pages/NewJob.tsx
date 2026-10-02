@@ -14,10 +14,15 @@ import { config } from "../lib/config.js";
 import { wagmiConfig } from "../lib/wagmi.js";
 
 interface Payee {
-  kind: "X402_ORIGIN" | "ADDRESS";
+  kind: "X402_ORIGIN" | "ADDRESS" | "MARKETPLACE";
   value: string;
   label: string;
+  /** MARKETPLACE only: the most per call, in USDC. */
+  maxPrice?: string;
 }
+
+/** The marketplace an owner can allow in one click (the API knows it as "circle-agents"). */
+const CIRCLE_MARKETPLACE = { id: "circle-agents", name: "Circle Agent Marketplace" };
 
 type StepState = "todo" | "doing" | "done" | "failed";
 
@@ -157,7 +162,10 @@ function PayeesStep({
 }) {
   const [value, setValue] = useState("");
   const [label, setLabel] = useState("");
+  const [maxPrice, setMaxPrice] = useState("0.05");
   const kind = /^0x[0-9a-fA-F]{40}$/.test(value.trim()) ? "ADDRESS" : "X402_ORIGIN";
+  const market = payees.find((p) => p.kind === "MARKETPLACE");
+  const others = payees.filter((p) => p.kind !== "MARKETPLACE");
   const ok = kind === "ADDRESS" || /^https?:\/\/\S+$/.test(value.trim());
   return (
     <div className="space-y-4">
@@ -167,7 +175,52 @@ function PayeesStep({
           Sellers (a website) and vendors (a wallet). Nobody else.
         </p>
       </div>
-      {payees.map((p, i) => (
+      <label className="flex gap-3 rounded-xl border border-line p-3 text-sm">
+        <input
+          type="checkbox"
+          className="mt-1"
+          checked={market !== undefined}
+          onChange={(e) =>
+            setPayees(
+              e.target.checked
+                ? [
+                    ...others,
+                    {
+                      kind: "MARKETPLACE",
+                      value: CIRCLE_MARKETPLACE.id,
+                      label: CIRCLE_MARKETPLACE.name,
+                      maxPrice,
+                    },
+                  ]
+                : others,
+            )
+          }
+        />
+        <span className="min-w-0 flex-1">
+          <span className="block font-medium">Any service in {CIRCLE_MARKETPLACE.name}</span>
+          <span className="block text-muted">
+            The agent can search it and buy what it lists on this network, never above the listed
+            price. Your budget, caps and approvals still apply.
+          </span>
+          {market !== undefined && (
+            <span className="mt-2 flex items-center gap-2">
+              <span className="text-muted">At most</span>
+              <input
+                className={`${field} max-w-24`}
+                inputMode="decimal"
+                value={maxPrice}
+                onChange={(e) => {
+                  setMaxPrice(e.target.value);
+                  setPayees([...others, { ...market, maxPrice: e.target.value.trim() }]);
+                }}
+                aria-label="Most per call, USDC"
+              />
+              <span className="text-muted">USDC per call</span>
+            </span>
+          )}
+        </span>
+      </label>
+      {others.map((p, i) => (
         <div
           key={p.value}
           className="flex items-center justify-between gap-2 border-t border-line pt-3 text-sm"
@@ -179,7 +232,7 @@ function PayeesStep({
           <button
             aria-label="Remove"
             className="rounded-full p-1.5 hover:bg-surface"
-            onClick={() => setPayees(payees.filter((_, j) => j !== i))}
+            onClick={() => setPayees(payees.filter((q) => q !== others[i]))}
           >
             <X size={14} />
           </button>
@@ -303,7 +356,14 @@ function FundStep({
         });
         for (const p of draft.payees) {
           await api(`/jobs/${current.id}/payees`, {
-            body: { kind: p.kind, value: p.value, ...(p.label ? { label: p.label } : {}) },
+            body: {
+              kind: p.kind,
+              value: p.value,
+              ...(p.label ? { label: p.label } : {}),
+              ...(p.kind === "MARKETPLACE" && p.maxPrice
+                ? { filters: { maxPrice: p.maxPrice } }
+                : {}),
+            },
           });
         }
         setJob(current);

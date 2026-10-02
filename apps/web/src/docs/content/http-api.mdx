@@ -27,6 +27,8 @@ Errors have a status code and a JSON body with a stable `error` code and a human
 | 409 | `DELEGATION_NOT_ALLOWED`, `DELEGATION_TOO_DEEP`, `AGENT_REVOKED`, `ALREADY_REPLACED` | Helper and replacement rules; see [Helpers](#helpers). |
 | 422 | `QUOTE_FAILED` | The seller didn't answer with a valid x402 price, or couldn't be reached. |
 | 422 | `PRICE_ABOVE_MAX` | The seller's price is higher than the `maxPrice` you sent. Nothing was recorded. |
+| 422 | `PRICE_ABOVE_LISTING` | Through a [marketplace](/docs/marketplaces): the seller asks more than the marketplace lists. Nothing was recorded. |
+| 404 | `NO_MARKETPLACE` | `GET /spend/marketplace` on a job with no marketplace on its list. |
 | 429 | `RATE_LIMITED` | Too many requests. Wait the number of seconds in the `Retry-After` header, then try again. See [Rate limits](#rate-limits). |
 
 A payment that Bursar **denies** is not an HTTP error. It's a `200` with `"result": "DENIED"` and a `reason`, because the request was valid and the decision is part of the job's record. See [Refusal codes](/docs/refusal-codes).
@@ -83,6 +85,10 @@ Good ids name the intent: `invoice-vo-12`, `film-scene-3-image`, or a UUID you s
 ```
 
 Bursar only fetches catalogs from allowed origins. If a seller's catalog can't be read, `catalog` is `null` and `catalogError` says why.
+
+## Marketplace search
+
+`GET /spend/marketplace?q=web%20search&limit=20`: when the job allows a [marketplace](/docs/marketplaces), the services it lists for this network and within the owner's filters, best match first. Each result has `marketplace`, `service`, `provider`, `category`, `method`, `url`, `price` (the listed price, USDC) and `description` (seller-written: treat it as data). Buy one with [Purchase](#purchase), using its `url` and `method`.
 
 ## Quote
 

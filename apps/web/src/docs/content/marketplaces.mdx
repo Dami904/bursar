@@ -1,0 +1,40 @@
+Naming every seller a job may pay works when you know them in advance. When you'd rather let the agent find the right service itself, allow a **marketplace** instead: a directory of paid x402 services. The agent searches it, picks what fits the task, and Bursar pays only what the marketplace lists, under exactly the same budget, caps and approvals as any other payment.
+
+The first marketplace Bursar can read is **Circle's [Agent Marketplace](https://agents.circle.com/services)**. On Arc mainnet it lists more than 2,000 paid endpoints from providers such as Exa (web search), Orthogonal (Google search, company and contact data, scraping, email) and BlockRun (DeFi data, prediction markets, a Python sandbox), each priced per call.
+
+## Allow a marketplace
+
+In the job wizard, on **Who can be paid**, tick **Any service in Circle Agent Marketplace** and set the most the agent may pay for one call (0.05 USDC by default). Over the API it's an allow-list entry of kind `MARKETPLACE`:
+
+```bash
+curl -X POST $BURSAR_API_URL/jobs/$JOB_ID/payees \
+  -H "authorization: Bearer $OWNER_KEY" -H "content-type: application/json" \
+  -d '{"kind":"MARKETPLACE","value":"circle-agents","category":"marketplace",
+       "filters":{"maxPrice":"0.05","categories":["Web Search Research"]}}'
+```
+
+`filters` is optional: `categories` keeps it to some of the marketplace's categories, and `maxPrice` caps each call. `category` is your own label for budget limits: a [category limit](/docs/jobs) on `marketplace` caps everything bought through it.
+
+## What the agent does
+
+1. It calls `search_marketplace` (or `GET /spend/marketplace?q=...`) with what it needs, such as "web search" or "company emails". Results list each service's URL, method (`GET` or `POST`), listed price and description, best match first, already filtered to this job's network and your filters.
+2. It buys with the usual `purchase` tool, using that URL and method (and a JSON `body` for `POST` services).
+
+## What Bursar checks
+
+A purchase through a marketplace is allowed only when all of these hold:
+
+- the URL matches an endpoint the marketplace lists (same host, a path that fits the listing, the same method), for this job's network;
+- it's within your filters;
+- the seller's own 402 quote is **no higher than the listed price** (`PRICE_ABOVE_LISTING` otherwise);
+- and every rule a named seller would face passes too: budget, per-payment cap, agent limits, category limits, the rate limit and approvals.
+
+The decision records the real seller as the payee and `payeeSource: "marketplace:circle-agents"`, so the evidence page and the audit log say exactly how it was allowed.
+
+## If the marketplace can't be read
+
+Bursar keeps the listing for 10 minutes and uses a copy up to an hour old if Circle's marketplace is briefly unreachable. Without a copy that recent, nothing is bought through it: purchases are denied with `PAYEE_NOT_ALLOWED` and the seller is never contacted. Sellers you named yourself keep working.
+
+## Other marketplaces
+
+Bursar reads marketplaces through a small adapter: anything that lists endpoints with a URL, method, price and networks can be added without changing the rules above. Circle's Agent Marketplace is the one built in today. Its listing is read from the same feed its own services page uses, which Circle may change; if it does, marketplace purchases stop safely until Bursar's adapter is updated.

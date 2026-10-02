@@ -28,7 +28,7 @@ export const jobStatusEnum = pgEnum("job_status", [
   "CLOSED",
 ]);
 export const agentStatusEnum = pgEnum("agent_status", ["ACTIVE", "REVOKED"]);
-export const payeeKindEnum = pgEnum("payee_kind", ["X402_ORIGIN", "ADDRESS"]);
+export const payeeKindEnum = pgEnum("payee_kind", ["X402_ORIGIN", "ADDRESS", "MARKETPLACE"]);
 export const decisionKindEnum = pgEnum("decision_kind", ["PURCHASE", "INVOICE"]);
 export const decisionResultEnum = pgEnum("decision_result", [
   "ALLOWED",
@@ -257,6 +257,11 @@ export const payees = pgTable(
     value: text("value").notNull(),
     label: text("label"),
     category: text("category"),
+    /**
+     * MARKETPLACE entries: the owner's limits on what it allows, as
+     * { categories?: string[], maxPrice?: string (USDC base units) }.
+     */
+    filters: jsonb("filters"),
     createdAt: at("created_at").notNull().defaultNow(),
   },
   (t) => [uniqueIndex("payees_job_value_idx").on(t.jobId, t.kind, t.value)],
@@ -312,6 +317,11 @@ export const decisions = pgTable(
      * they were.
      */
     requestHash: text("request_hash"),
+    /**
+     * How the payee was allowed when it isn't on the allow-list by name, e.g.
+     * "marketplace:circle-agents". Null otherwise, which leaves older entries as they were.
+     */
+    payeeSource: text("payee_source"),
     reasoning: text("reasoning").notNull(),
     result: decisionResultEnum("result").notNull(),
     reason: text("reason"),

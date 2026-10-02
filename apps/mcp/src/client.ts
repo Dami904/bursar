@@ -25,6 +25,8 @@ export interface BursarClient {
   budget(): Promise<Json>;
   payees(): Promise<Json>;
   quote(url: string, request?: SellerRequest): Promise<Json>;
+  /** Searches the marketplaces on the job's allow-list. */
+  marketplace(query: string, limit?: number): Promise<Json>;
   purchase(input: {
     operationId: string;
     url: string;
@@ -71,6 +73,11 @@ export function bursarClient(
     budget: () => call("GET", "/spend/budget"),
     payees: () => call("GET", "/spend/payees"),
     quote: (url, request) => call("POST", "/spend/quote", { url, ...request }),
+    marketplace: (query, limit = 20) =>
+      call(
+        "GET",
+        `/spend/marketplace?q=${encodeURIComponent(query)}&limit=${encodeURIComponent(String(limit))}`,
+      ),
     purchase: (input) => call("POST", "/spend/purchase", input),
     invoice: (input) => call("POST", "/spend/invoice", input),
     authorization: (id) => call("GET", `/spend/authorizations/${encodeURIComponent(id)}`),

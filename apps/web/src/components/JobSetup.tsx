@@ -260,9 +260,11 @@ function AgentRow({
 
 export interface Payee {
   id: string;
-  kind: "X402_ORIGIN" | "ADDRESS";
+  kind: "X402_ORIGIN" | "ADDRESS" | "MARKETPLACE";
   value: string;
   label: string | null;
+  /** MARKETPLACE only: the owner's limits on what it allows. */
+  filters?: { categories: string[]; maxPrice: string | null } | null;
 }
 
 /**
@@ -380,7 +382,13 @@ function PayeeRow({ payee, job, readOnly }: { payee: Payee; job: Job; readOnly: 
             {payee.label ??
               (vendor ? shortAddress(payee.value) : payee.value.replace(/^https?:\/\//, ""))}
           </span>
-          <span className="text-xs text-muted">{vendor ? "Vendor" : "Seller"}</span>
+          <span className="text-xs text-muted">
+            {vendor
+              ? "Vendor"
+              : payee.kind === "MARKETPLACE"
+                ? `Marketplace: any listed service${payee.filters?.maxPrice ? `, up to ${payee.filters.maxPrice} USDC a call` : ""}`
+                : "Seller"}
+          </span>
         </span>
         {vendor &&
           (allowed.data === true ? (

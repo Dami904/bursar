@@ -94,7 +94,18 @@ export async function jobPayees(db: Db, ownerId: string, jobId: string) {
     value: p.value,
     label: p.label,
     category: p.category,
+    filters: marketplaceFilters(p.filters),
   }));
+}
+
+/** A marketplace entry's filters as the console shows them: categories and a USDC max price. */
+export function marketplaceFilters(stored: unknown) {
+  if (stored === null || typeof stored !== "object") return null;
+  const f = stored as { categories?: unknown; maxPrice?: unknown };
+  return {
+    categories: Array.isArray(f.categories) ? f.categories.map(String) : [],
+    maxPrice: typeof f.maxPrice === "string" ? formatUsdc(BigInt(f.maxPrice)) : null,
+  };
 }
 
 export async function jobAgents(db: Db, ownerId: string, jobId: string) {

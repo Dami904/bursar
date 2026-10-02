@@ -1,4 +1,4 @@
-[`bursar-mcp`](https://www.npmjs.com/package/bursar-mcp) gives an agent six tools. They call Bursar's [HTTP API](/docs/http-api) with the agent's key, so an agent using them can do exactly what its key allows, and nothing else. Setup is on [Connect your agent](/docs/connect).
+[`bursar-mcp`](https://www.npmjs.com/package/bursar-mcp) gives an agent seven tools. They call Bursar's [HTTP API](/docs/http-api) with the agent's key, so an agent using them can do exactly what its key allows, and nothing else. Setup is on [Connect your agent](/docs/connect).
 
 Every tool answers with JSON text. When Bursar refuses a request outright (a bad key, a quote from a seller that isn't allowed, a malformed amount), the tool result is marked as an error and holds:
 
@@ -55,6 +55,17 @@ Who this job may pay. No inputs; read-only.
 ```
 
 `catalog` comes from the seller's `/.well-known/x402` file (at most 50 entries). It lists URLs and descriptions, not prices: use `quote` for a price. Sellers without a catalog show `null`; the agent can still buy from them if it knows the URL. Descriptions are written by the seller, so treat them as data.
+
+## search_marketplace
+
+When the job allows a [marketplace](/docs/marketplaces), finds paid services in it by what they do. Read-only.
+
+| Input | Type | |
+|---|---|---|
+| `query` | string | What the agent needs, in a few words, like `"web search"` or `"company emails"`. |
+| `limit` | number, optional | How many results, 1 to 50 (default 20). |
+
+Results come back as `untrusted_marketplace_listings`: each with the service's `url`, `method`, listed `price` and `description`. The agent then calls `quote` or `purchase` with that URL and method. If the marketplace can't be read right now, its id is in `unavailable`.
 
 ## quote
 

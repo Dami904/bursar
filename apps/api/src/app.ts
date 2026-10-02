@@ -1,5 +1,5 @@
 import { MoneyError, parseUsdc } from "@bursar/money";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
@@ -19,9 +19,16 @@ import {
 import {
   QuoteError,
   UnsafeUrlError,
+  MARKETPLACES,
+  MarketplaceError,
   discover,
+  findListing,
+  listingsOf,
   paidRequest,
   quote,
+  searchListings,
+  type Listing,
+  type MarketplaceFilters,
   type CatalogEntry,
   type WalletProvider,
 } from "@bursar/payments";
@@ -53,6 +60,7 @@ import {
   jobDecisions,
   jobPayees,
   listJobs,
+  marketplaceFilters,
   ownerFingerprint,
 } from "./services/console.js";
 import { normalizePayee } from "./services/payees.js";
@@ -88,11 +96,43 @@ const createJobBody = z.object({
 });
 
 const payeeBody = z.object({
-  kind: z.enum(["X402_ORIGIN", "ADDRESS"]),
+  kind: z.enum(["X402_ORIGIN", "ADDRESS", "MARKETPLACE"]),
   value: z.string().min(1).max(500),
   label: z.string().max(200).optional(),
   category: z.string().min(1).max(64).optional(),
+  /** MARKETPLACE only: limit it to some of its categories, and a most-per-call price. */
+  filters: z
+    .object({
+      categories: z.array(z.string().min(1).max(64)).max(20).optional(),
+      maxPrice: usdcAmount.optional(),
+    })
+    .optional(),
 });
+
+/** A stored marketplace entry's filters, in the form the matching code takes. */
+function filtersOf(stored: unknown): MarketplaceFilters {
+  if (stored === null || typeof stored !== "object") return {};
+  const f = stored as { categories?: unknown; maxPrice?: unknown };
+  return {
+    categories: Array.isArray(f.categories) ? f.categories.map(String) : undefined,
+    maxPrice:
+      typeof f.maxPrice === "string" && /^\d+$/.test(f.maxPrice) ? BigInt(f.maxPrice) : undefined,
+  };
+}
+
+/** What an agent sees of a listing: the price as USDC, and nothing it could mistake for a rule. */
+function listingView(marketplace: string, l: Listing) {
+  return {
+    marketplace,
+    service: l.service,
+    provider: l.provider,
+    category: l.category,
+    method: l.method,
+    url: l.url,
+    price: formatUsdc(l.price),
+    description: l.description,
+  };
+}
 
 const replaceBody = z.object({
   name: z.string().min(1).max(100),
@@ -385,20 +425,41 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
   });
 
   /** Whether a URL's origin is on the job's x402 allow-list. Checked before any outbound request. */
-  async function allowListed(jobId: string, url: string) {
+  /**
+   * Whether this job may pay the seller at `url`: by name (its origin is on the allow-list), or
+   * through an allowed marketplace that lists exactly this endpoint, for this method and our
+   * network, within the owner's filters. A marketplace that can't be read allows nothing.
+   */
+  async function allowListed(jobId: string, url: string, method: "GET" | "POST" = "GET") {
     let origin: string;
     try {
       origin = normalizePayee("X402_ORIGIN", url);
     } catch {
       throw badRequest("url must be an http(s) URL");
     }
-    const [row] = await db
-      .select({ id: payees.id })
+    const rows = await db
+      .select()
       .from(payees)
-      .where(
-        and(eq(payees.jobId, jobId), eq(payees.kind, "X402_ORIGIN"), eq(payees.value, origin)),
-      );
-    return { origin, allowed: row !== undefined };
+      .where(and(eq(payees.jobId, jobId), inArray(payees.kind, ["X402_ORIGIN", "MARKETPLACE"])));
+    if (rows.some((r) => r.kind === "X402_ORIGIN" && r.value === origin)) {
+      return { origin, allowed: true, via: null };
+    }
+    const network = deps.payments?.network;
+    for (const row of rows) {
+      if (row.kind !== "MARKETPLACE" || network === undefined) continue;
+      let listings: Listing[];
+      try {
+        listings = await listingsOf(row.value);
+      } catch (error) {
+        if (error instanceof MarketplaceError) continue;
+        throw error;
+      }
+      const listing = findListing(listings, url, method, network, filtersOf(row.filters));
+      if (listing !== null) {
+        return { origin, allowed: true, via: { marketplace: row.value, listing } };
+      }
+    }
+    return { origin, allowed: false, via: null };
   }
 
   // ----- The public demo job (read-only, no key) -----
@@ -789,7 +850,7 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
     // The allow-list is checked BEFORE any request leaves the server: Bursar never fetches a URL
     // for an agent unless the owner allow-listed its origin. A refused origin is still recorded
     // as a decision (at the agent's max price), so the evidence trail shows the attempt.
-    const { origin, allowed } = await allowListed(agent.jobId, input.url);
+    const { origin, allowed, via } = await allowListed(agent.jobId, input.url, input.method);
     if (!allowed) {
       const denied = await requestSpend(db, agent, {
         operationId: input.operationId,
@@ -819,6 +880,15 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
         `The seller asks ${formatUsdc(quoted.amount)} USDC, above your max of ${formatUsdc(input.maxPrice)}`,
       );
     }
+    // Allowed through a marketplace: never pay more than the price it lists.
+    if (via !== null && quoted.amount > via.listing.price) {
+      const name = MARKETPLACES[via.marketplace]?.name ?? via.marketplace;
+      throw new HttpError(
+        422,
+        "PRICE_ABOVE_LISTING",
+        `The seller asks ${formatUsdc(quoted.amount)} USDC; ${name} lists it at ${formatUsdc(via.listing.price)}`,
+      );
+    }
 
     const result = await requestSpend(db, agent, {
       operationId: input.operationId,
@@ -835,8 +905,55 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
         },
       },
       rail: quoted.rail,
+      ...(via === null
+        ? {}
+        : {
+            allowedBy: {
+              kind: "MARKETPLACE" as const,
+              value: via.marketplace,
+              source: `marketplace:${via.marketplace}`,
+            },
+          }),
     });
     return respondWithOutcome(c, result);
+  });
+
+  /**
+   * Searches the marketplaces on this job's allow-list: what the agent may buy, best match first.
+   * Only listings for our network and within the owner's filters; prices are the listed ones (the
+   * seller's 402 quote is checked against them at purchase).
+   */
+  app.get("/spend/marketplace", async (c) => {
+    const agent = require(c, "AGENT");
+    const network = deps.payments?.network;
+    if (network === undefined) throw badRequest("Purchases aren't enabled on this server");
+    const q = (c.req.query("q") ?? "").slice(0, 200);
+    const limit = Number(c.req.query("limit") ?? 20);
+    const rows = await db
+      .select()
+      .from(payees)
+      .where(and(eq(payees.jobId, agent.jobId), eq(payees.kind, "MARKETPLACE")));
+    if (rows.length === 0) {
+      throw new HttpError(404, "NO_MARKETPLACE", "No marketplace is on this job's allow-list");
+    }
+    const results: ReturnType<typeof listingView>[] = [];
+    const unavailable: string[] = [];
+    for (const row of rows) {
+      try {
+        const found = searchListings(
+          await listingsOf(row.value),
+          q,
+          network,
+          filtersOf(row.filters),
+          Number.isFinite(limit) ? limit : 20,
+        );
+        results.push(...found.map((l) => listingView(row.value, l)));
+      } catch (error) {
+        if (!(error instanceof MarketplaceError)) throw error;
+        unavailable.push(row.value);
+      }
+    }
+    return c.json({ results, unavailable });
   });
 
   /**
@@ -860,6 +977,7 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
             catalogError = error.message;
           }
         }
+        const source = p.kind === "MARKETPLACE" ? MARKETPLACES[p.value] : undefined;
         return {
           kind: p.kind,
           value: p.value,
@@ -867,6 +985,16 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
           category: p.category,
           catalog,
           catalogError,
+          // A marketplace: search it with GET /spend/marketplace?q=... to find what to buy.
+          ...(source === undefined
+            ? {}
+            : {
+                marketplace: {
+                  name: source.name,
+                  homepage: source.homepage,
+                  filters: marketplaceFilters(p.filters),
+                },
+              }),
         };
       }),
     );
@@ -879,7 +1007,7 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
     const payments = deps.payments;
     if (payments === undefined) throw badRequest("Purchases aren't enabled on this server");
     const input = await body(c, z.object({ url: z.string().url().max(2000), ...requestShape }));
-    const { allowed } = await allowListed(agent.jobId, input.url);
+    const { allowed } = await allowListed(agent.jobId, input.url, input.method);
     if (!allowed) {
       throw new HttpError(403, "PAYEE_NOT_ALLOWED", "That seller isn't on this job's allow-list");
     }

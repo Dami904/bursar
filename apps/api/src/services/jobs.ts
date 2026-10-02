@@ -71,9 +71,23 @@ export async function addPayee(
     value: string;
     label?: string | undefined;
     category?: string | undefined;
+    /** MARKETPLACE only: which marketplace categories, and the most per call (base units). */
+    filters?: { categories?: string[] | undefined; maxPrice?: bigint | undefined } | undefined;
   },
 ) {
   await getOwnedJob(db, ownerId, jobId);
+  if (input.filters !== undefined && input.kind !== "MARKETPLACE") {
+    throw badRequest("Filters only apply to a marketplace");
+  }
+  const filters =
+    input.kind !== "MARKETPLACE" || input.filters === undefined
+      ? null
+      : {
+          ...(input.filters.categories?.length ? { categories: input.filters.categories } : {}),
+          ...(input.filters.maxPrice === undefined
+            ? {}
+            : { maxPrice: input.filters.maxPrice.toString() }),
+        };
   const [payee] = await db
     .insert(payees)
     .values({
@@ -82,10 +96,11 @@ export async function addPayee(
       value: normalizePayee(input.kind, input.value),
       label: input.label ?? null,
       category: input.category ?? null,
+      filters,
     })
     .onConflictDoUpdate({
       target: [payees.jobId, payees.kind, payees.value],
-      set: { label: input.label ?? null, category: input.category ?? null },
+      set: { label: input.label ?? null, category: input.category ?? null, filters },
     })
     .returning();
   return payee;

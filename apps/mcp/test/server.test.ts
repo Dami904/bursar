@@ -18,6 +18,7 @@ function fake(overrides: Partial<BursarClient> = {}): BursarClient {
     budget: unused,
     payees: unused,
     quote: unused,
+    marketplace: unused,
     purchase: unused,
     invoice: unused,
     authorization: unused,
@@ -31,7 +32,7 @@ function body(result: Awaited<ReturnType<Client["callTool"]>>) {
 }
 
 describe("bursar MCP server", () => {
-  it("lists the six spending tools", async () => {
+  it("lists the seven spending tools", async () => {
     const client = await connect(fake());
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
@@ -41,6 +42,31 @@ describe("bursar MCP server", () => {
       "pay_invoice",
       "purchase",
       "quote",
+      "search_marketplace",
+    ]);
+  });
+
+  it("searches the job's marketplaces and labels listings as untrusted", async () => {
+    const marketplace = vi.fn().mockResolvedValue({
+      results: [
+        {
+          marketplace: "circle-agents",
+          service: "Exa",
+          method: "POST",
+          url: "https://api.exa.ai/search",
+          price: "0.007",
+          description: "Web search",
+        },
+      ],
+      unavailable: [],
+    });
+    const client = await connect(fake({ marketplace }));
+    const out = body(
+      await client.callTool({ name: "search_marketplace", arguments: { query: "web search" } }),
+    );
+    expect(marketplace).toHaveBeenCalledWith("web search", undefined);
+    expect(out.untrusted_marketplace_listings).toEqual([
+      expect.objectContaining({ service: "Exa", url: "https://api.exa.ai/search" }),
     ]);
   });
 

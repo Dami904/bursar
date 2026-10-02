@@ -26,14 +26,15 @@ Or in `.cursor/mcp.json` / `claude_desktop_config.json`:
 
 ## Tools
 
-| Tool            | What it does                                                    |
-| --------------- | --------------------------------------------------------------- |
-| `get_budget`    | Remaining budget, per-payment cap, approval threshold, expiry   |
-| `list_sellers`  | Allowed x402 sellers (with catalogs) and vendor wallets         |
-| `quote`         | A seller's price, without buying                                |
-| `purchase`      | Buy from an allowed x402 seller; returns the content            |
-| `pay_invoice`   | Pay a vendor's invoice to its allow-listed wallet               |
-| `check_payment` | Follow a payment that is waiting for approval or still settling |
+| Tool                 | What it does                                                         |
+| -------------------- | -------------------------------------------------------------------- |
+| `get_budget`         | Remaining budget, per-payment cap, approval threshold, expiry        |
+| `list_sellers`       | Allowed x402 sellers (with catalogs) and vendor wallets              |
+| `search_marketplace` | Find services in an allowed marketplace (Circle's Agent Marketplace) |
+| `quote`              | A seller's price, without buying                                     |
+| `purchase`           | Buy from an allowed x402 seller; returns the content                 |
+| `pay_invoice`        | Pay a vendor's invoice to its allow-listed wallet                    |
+| `check_payment`      | Follow a payment that is waiting for approval or still settling      |
 
 `quote` and `purchase` take an optional `method` (`GET` by default, or `POST`) and a JSON `body` of up to 4 KB, for sellers such as search APIs that answer `POST`.
 

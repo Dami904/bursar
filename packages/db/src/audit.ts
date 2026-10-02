@@ -105,6 +105,7 @@ export function decisionPayload(d: DecisionRow) {
     // Only on decisions made since it existed: left out (not null) otherwise, so older entries
     // rebuild to exactly what was hashed.
     requestHash: d.requestHash ?? undefined,
+    payeeSource: d.payeeSource ?? undefined,
     createdAt: d.createdAt,
   };
 }

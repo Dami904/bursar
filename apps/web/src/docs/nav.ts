@@ -66,6 +66,11 @@ export const docSections: readonly DocSection[] = [
         "Let agents pay a vendor's invoice straight from the job's funds.",
       ),
       page(
+        "marketplaces",
+        "Marketplaces",
+        "Let the agent find and buy services from Circle's Agent Marketplace, within your rules.",
+      ),
+      page(
         "nanopayments",
         "Nanopayments",
         "Sub-cent purchases paid through Circle Gateway, under the same budget and rules.",
