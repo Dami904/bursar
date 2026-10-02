@@ -63,6 +63,18 @@ function fakeBursar(overrides: Partial<Bursar> = {}) {
     budget: async () => ({ remaining: "1.00" }),
     payees: async () => ({ payees: [{ value: "https://seller.example" }] }),
     quote: async () => ({ price: "0.01" }),
+    marketplace: async () => ({
+      results: [
+        {
+          service: "Serper",
+          method: "POST",
+          url: "https://np.orthogonal.com/serper/news",
+          price: "0.002",
+          description: "Google News search",
+        },
+      ],
+      unavailable: [],
+    }),
     purchase: async (input) => {
       purchases.push({ ...input, key });
       return {
@@ -217,6 +229,68 @@ describe("operator loop", () => {
     const result = await runOperator({ provider, bursar, brief: "b" });
     expect(result.outcome).toBe("error");
     expect(runs[0]).toMatchObject({ outcome: "error" });
+  });
+});
+
+describe("marketplace", () => {
+  it("searches the marketplace, then buys a POST service with its JSON body and a reason", async () => {
+    const provider = new ScriptedProvider([
+      [
+        turn([call("search_marketplace", { query: "news search" })]),
+        turn([
+          call("purchase", {
+            url: "https://np.orthogonal.com/serper/news",
+            body_json: '{"q":"Arc mainnet agent payments"}',
+            max_price: "0.01",
+            reasoning:
+              "News search is what the brief needs; Serper fits and is the cheapest option",
+          }),
+        ]),
+        turn([call("finish", { summary: "Searched the news for 0.002." })]),
+      ],
+    ]);
+    const { bursar, purchases } = fakeBursar();
+    const result = await runOperator({ provider, bursar, brief: "Find recent news" });
+
+    expect(provider.sessions[0]!.tools).toContain("search_marketplace");
+    const listings = JSON.parse(provider.sessions[0]!.results[0]![0]!.content) as Record<
+      string,
+      unknown
+    >;
+    expect(listings.untrusted_marketplace_listings).toEqual([
+      expect.objectContaining({ service: "Serper", method: "POST" }),
+    ]);
+    // A body without a method means POST.
+    expect(purchases[0]).toMatchObject({
+      url: "https://np.orthogonal.com/serper/news",
+      method: "POST",
+      body: { q: "Arc mainnet agent payments" },
+    });
+    expect(result.outcome).toBe("completed");
+  });
+
+  it("returns a malformed body or method to the model as an error, without buying", async () => {
+    const provider = new ScriptedProvider([
+      [
+        turn([
+          call("purchase", {
+            url: "https://np.orthogonal.com/serper/news",
+            body_json: "{not json",
+            max_price: "0.01",
+            reasoning: "x",
+          }),
+          call("quote", { url: "https://np.orthogonal.com/serper/news", method: "DELETE" }),
+        ]),
+        turn([call("finish", { summary: "Stopped." })]),
+      ],
+    ]);
+    const { bursar, purchases } = fakeBursar();
+    await runOperator({ provider, bursar, brief: "x" });
+    const [bad, method] = provider.sessions[0]!.results[0]!;
+    expect(bad!.isError).toBe(true);
+    expect(bad!.content).toContain("body_json must be valid JSON");
+    expect(method!.content).toContain("method must be GET or POST");
+    expect(purchases).toHaveLength(0);
   });
 });
 

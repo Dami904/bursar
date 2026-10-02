@@ -35,6 +35,11 @@ const env = z
       .string()
       .regex(/^\d+(\.\d{1,6})?$/, "a USDC amount, like 5 or 2.50")
       .optional(),
+    /**
+     * The job shown read-only at /demo. PUBLIC_JOB_ID shows a job without the testnet demo's
+     * automation (brief rotation, auto-approval), which DEMO_JOB_ID also turns on in the worker.
+     */
+    PUBLIC_JOB_ID: z.string().uuid().optional(),
     /** The job shown read-only at /demo. */
     DEMO_JOB_ID: z.string().uuid().optional(),
   })
@@ -60,7 +65,13 @@ const app = createApp(db, {
   chain: { chainId: env.ARC_CHAIN_ID, vault: env.JOB_VAULT_ADDRESS as `0x${string}` },
   webOrigins: webOrigins,
   telegramBot: env.TELEGRAM_BOT_USERNAME,
-  demoJobId: env.DEMO_JOB_ID,
+  demoJobId: env.PUBLIC_JOB_ID ?? env.DEMO_JOB_ID,
+  // The worker runs the operator with a model key unless AUTOPILOT=false (same process).
+  operatorAvailable:
+    process.env.AUTOPILOT !== "false" &&
+    ((process.env.OPERATOR_PROVIDER ?? "gemini") === "claude"
+      ? Boolean(process.env.ANTHROPIC_API_KEY)
+      : Boolean(process.env.GEMINI_API_KEY)),
   ...(env.MAX_JOB_BUDGET === undefined ? {} : { maxJobBudget: parseUsdc(env.MAX_JOB_BUDGET) }),
   logRequests: true,
   // Render (and its Cloudflare edge) forward the client's address.

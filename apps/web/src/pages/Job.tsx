@@ -33,6 +33,12 @@ import { blockedBecause, money, statusOf, time, whatFor } from "../lib/format.js
 export function Job() {
   const { id = "" } = useParams();
   const job = useQuery({ queryKey: ["job", id], queryFn: () => api<JobT>(`/jobs/${id}`) });
+  // Bursar's own AI operator only runs on servers with a model key: no brief box where it can't.
+  const features = useQuery({
+    queryKey: ["features"],
+    queryFn: () => api<{ operator: boolean }>("/features"),
+    staleTime: 5 * 60_000,
+  });
   const decisions = useQuery({
     queryKey: ["decisions", id],
     queryFn: () => api<{ decisions: Decision[] }>(`/jobs/${id}/decisions`),
@@ -128,7 +134,7 @@ export function Job() {
             <h2 className="mb-2 text-xs text-muted">Agents</h2>
             <AgentsSection jobId={j.id} agents={agents.data?.agents ?? []} readOnly={closed} />
           </section>
-          {!closed && (
+          {!closed && features.data?.operator === true && (
             <section>
               <h2 className="mb-2 text-xs text-muted">Operator brief</h2>
               <BriefSection job={j} />

@@ -3,7 +3,7 @@ import { ExternalLink } from "lucide-react";
 import { AgentsSection, PayeesSection, type Payee } from "../components/JobSetup.js";
 import { BudgetBar, ErrorLine, Loading } from "../components/ui.js";
 import { api, type Agent, type Decision, type Job } from "../lib/api.js";
-import { addressUrl, txUrl } from "../lib/config.js";
+import { addressUrl, config, txUrl } from "../lib/config.js";
 import { money } from "../lib/format.js";
 import { DecisionRow } from "./Job.js";
 import { EvidencePage } from "./Evidence.js";
@@ -19,7 +19,7 @@ interface DemoData {
 }
 
 /**
- * A real job on Arc testnet, run by Bursar's own AI operator, open to anyone. Read-only: the same
+ * A real job on Arc (testnet or mainnet, per build), run by Bursar's own AI operator, open to anyone. Read-only: the same
  * job page owners see, without any buttons. It refreshes itself as the operator works.
  */
 export function Demo() {
@@ -33,8 +33,9 @@ export function Demo() {
       <SiteHeader />
       <main className="mx-auto max-w-5xl px-5 pb-24 pt-8">
         <div className="mb-8 rounded-2xl border border-seal bg-seal-bg px-4 py-3 text-sm text-seal-text">
-          A real job on Arc testnet, run by Bursar's own AI operator. Every transaction opens on the
-          chain. Payments above 0.10 USDC are approved by a demo approver after a minute.
+          A real job on Arc {config.mainnet ? "mainnet, spending real USDC" : "testnet"}, run by
+          Bursar's own AI operator. Every transaction opens on the chain. Payments above 0.10 USDC
+          are approved by a demo approver after a minute.
         </div>
         {q.isPending && <Loading />}
         <ErrorLine error={q.error} />

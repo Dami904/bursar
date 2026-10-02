@@ -13,16 +13,26 @@ export class BursarError extends Error {
   }
 }
 
+/** How a seller is called: GET, or POST with a JSON body (search and scraping sellers). */
+export interface SellerRequest {
+  method?: "GET" | "POST";
+  body?: Record<string, unknown>;
+}
+
 export interface Bursar {
   budget(): Promise<unknown>;
   payees(): Promise<unknown>;
-  quote(url: string): Promise<unknown>;
-  purchase(input: {
-    operationId: string;
-    url: string;
-    maxPrice: string;
-    reasoning: string;
-  }): Promise<Record<string, unknown>>;
+  quote(url: string, request?: SellerRequest): Promise<unknown>;
+  /** Searches the marketplaces on the job's allow-list. */
+  marketplace(query: string, limit?: number): Promise<unknown>;
+  purchase(
+    input: {
+      operationId: string;
+      url: string;
+      maxPrice: string;
+      reasoning: string;
+    } & SellerRequest,
+  ): Promise<Record<string, unknown>>;
   invoice(input: {
     operationId: string;
     payee: string;
@@ -63,7 +73,12 @@ export function bursarClient(baseUrl: string, key: string): Bursar {
   return {
     budget: () => call("GET", "/spend/budget"),
     payees: () => call("GET", "/spend/payees"),
-    quote: (url) => call("POST", "/spend/quote", { url }),
+    quote: (url, request) => call("POST", "/spend/quote", { url, ...request }),
+    marketplace: (query, limit = 15) =>
+      call(
+        "GET",
+        `/spend/marketplace?q=${encodeURIComponent(query)}&limit=${encodeURIComponent(String(limit))}`,
+      ),
     purchase: (input) => call("POST", "/spend/purchase", input) as Promise<Record<string, unknown>>,
     invoice: (input) => call("POST", "/spend/invoice", input) as Promise<Record<string, unknown>>,
     authorization: (id) =>

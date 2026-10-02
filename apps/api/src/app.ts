@@ -238,6 +238,8 @@ export interface ApiDeps {
    * job still needs its owner's key. It's our own business's job, so its data is ours to show.
    */
   readonly demoJobId?: string | undefined;
+  /** Whether Bursar's own AI operator runs on this server (a model key, autopilot on). */
+  readonly operatorAvailable?: boolean;
   /** The most any one job may have as its budget (mainnet, while it's new). No cap when unset. */
   readonly maxJobBudget?: bigint;
   /** One JSON line per request (method, path, status, time). Off in tests. */
@@ -269,7 +271,13 @@ const SPEND_PATHS = new Set([
   "/spend/subagent",
 ]);
 
-const PUBLIC_PATHS = new Set(["/health", "/metrics/public", "/auth/nonce", "/auth/verify"]);
+const PUBLIC_PATHS = new Set([
+  "/health",
+  "/features",
+  "/metrics/public",
+  "/auth/nonce",
+  "/auth/verify",
+]);
 
 const signInBody = z.object({
   message: z.string().min(1).max(4000),
@@ -474,6 +482,14 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
     if (job === undefined) throw notFound("Demo");
     return job;
   }
+
+  /** What this server offers, for the console to show only what works here. */
+  app.get("/features", (c) =>
+    c.json({
+      operator: deps.operatorAvailable === true,
+      maxJobBudget: deps.maxJobBudget === undefined ? null : formatUsdc(deps.maxJobBudget),
+    }),
+  );
 
   app.get("/demo", async (c) => {
     const job = await demoJob();

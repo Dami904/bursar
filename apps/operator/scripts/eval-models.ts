@@ -63,6 +63,7 @@ function simulatedBursar(world: World): Bursar {
     }
   };
   const bursar: Bursar = {
+    marketplace: async () => ({ results: [], unavailable: [] }),
     budget: async () => ({
       status: "ACTIVE",
       remaining: world.remaining.toFixed(2),

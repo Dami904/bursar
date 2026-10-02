@@ -35,3 +35,21 @@ describe("per-job budget cap", () => {
     expect((await createJob(key, "5.00")).status).toBe(201);
   });
 });
+
+describe("what the server offers", () => {
+  it("says whether the AI operator runs here and what the budget cap is, without a key", async () => {
+    const withOperator = createApp(db, {
+      operatorAvailable: true,
+      maxJobBudget: parseUsdc("5.00"),
+    });
+    expect(await (await withOperator.request("/features")).json()).toEqual({
+      operator: true,
+      maxJobBudget: "5.00",
+    });
+    const plain = createApp(db);
+    expect(await (await plain.request("/features")).json()).toEqual({
+      operator: false,
+      maxJobBudget: null,
+    });
+  });
+});
