@@ -1,4 +1,4 @@
-import { auditAnchors, verifyChain, type Db } from "@bursar/db";
+import { auditAnchors, auditHead, verifyChain, type Db } from "@bursar/db";
 import { auditAnchorAbi } from "@bursar/payments";
 import { and, desc, eq, inArray, lte } from "drizzle-orm";
 import type { Account, Chain, Hex, PublicClient, Transport, WalletClient } from "viem";
@@ -59,6 +59,14 @@ export async function anchorOnce(deps: AnchorDeps): Promise<AnchorRow | null> {
     .orderBy(desc(auditAnchors.anchorSeq))
     .limit(1);
 
+  // Is an anchor due? Decided from the newest entry alone (one row). Verifying reads the whole
+  // log, so it runs only when there's something to anchor, not on every tick.
+  const head = await auditHead(deps.db);
+  const waiting = (head?.seq ?? 0) - (last?.chainSeq ?? 0);
+  if (waiting <= 0) return null;
+  const overdue = last === undefined || Date.now() - last.sentAt.getTime() >= deps.intervalMs;
+  if (waiting < deps.everyEntries && !overdue) return null;
+
   const check = await verifyChain(deps.db);
   if (!check.ok) {
     log.error("audit log failed verification: not anchoring it", undefined, {
@@ -67,10 +75,6 @@ export async function anchorOnce(deps: AnchorDeps): Promise<AnchorRow | null> {
     });
     return null;
   }
-  const waiting = check.headSeq - (last?.chainSeq ?? 0);
-  if (waiting <= 0) return null;
-  const overdue = last === undefined || Date.now() - last.sentAt.getTime() >= deps.intervalMs;
-  if (waiting < deps.everyEntries && !overdue) return null;
 
   const seq = latestSeq + 1;
   const args = [check.head as Hex, BigInt(seq), BigInt(check.headSeq)] as const;
