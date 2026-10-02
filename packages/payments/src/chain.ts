@@ -84,6 +84,7 @@ export const auditAnchorAbi = parseAbi([
 export const usdcAbi = parseAbi([
   "function balanceOf(address) view returns (uint256)",
   "function approve(address spender, uint256 amount) returns (bool)",
+  "function allowance(address owner, address spender) view returns (uint256)",
   "function transfer(address to, uint256 amount) returns (bool)",
   /** EIP-3009: true once a signed authorization's nonce has been used. */
   "function authorizationState(address authorizer, bytes32 nonce) view returns (bool)",

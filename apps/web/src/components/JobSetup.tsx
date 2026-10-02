@@ -1,10 +1,10 @@
-import { jobVaultAbi } from "@bursar/payments/chain";
+import { jobVaultAbi, usdcAbi } from "@bursar/payments/chain";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, MoreHorizontal, Plus } from "lucide-react";
 import { useState } from "react";
-import type { Hex } from "viem";
+import { parseUnits, type Hex } from "viem";
 import { useConnection, useReadContract, useSwitchChain, useWriteContract } from "wagmi";
-import { waitForTransactionReceipt } from "wagmi/actions";
+import { readContract, waitForTransactionReceipt } from "wagmi/actions";
 import { api, type Agent, type Job } from "../lib/api.js";
 import { config } from "../lib/config.js";
 import { money, shortAddress } from "../lib/format.js";
@@ -255,6 +255,98 @@ function AgentRow({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * A job that's open in the vault but not funded yet: the setup stopped part way (a closed tab, a
+ * wallet that never answered). Finishes it from here. Each step is skipped when Arc already shows
+ * it done, so running it twice never deposits twice.
+ */
+export function FinishSetup({ job }: { job: Job }) {
+  const queryClient = useQueryClient();
+  const connection = useConnection();
+  const { mutateAsync: switchChain } = useSwitchChain();
+  const { mutateAsync: write } = useWriteContract();
+  const [step, setStep] = useState<string | null>(null);
+  const vaultJobId = job.onChain.vaultJobId as Hex | null;
+  const missing = parseUnits(job.budget, 6) - parseUnits(job.deposited, 6);
+  const finish = useMutation({
+    mutationFn: async () => {
+      const owner = connection.address;
+      if (owner === undefined) throw new Error("Connect your wallet first");
+      if (vaultJobId === null) throw new Error("The job isn't in the vault yet");
+      if (connection.chainId !== config.chain.id) await switchChain({ chainId: config.chain.id });
+      const send = async (label: string, tx: () => Promise<Hex>) => {
+        setStep(label);
+        const receipt = await waitForTransactionReceipt(wagmiConfig, { hash: await tx() });
+        if (receipt.status !== "success")
+          throw new Error(`${label}: the transaction failed on Arc`);
+      };
+      if (missing > 0n) {
+        const allowed = await readContract(wagmiConfig, {
+          address: config.usdc,
+          abi: usdcAbi,
+          functionName: "allowance",
+          args: [owner, config.vault],
+        });
+        if (allowed < missing) {
+          await send("Allow the deposit", () =>
+            write({
+              address: config.usdc,
+              abi: usdcAbi,
+              functionName: "approve",
+              args: [config.vault, missing],
+            }),
+          );
+        }
+        await send(`Deposit ${job.budget} USDC`, () =>
+          write({
+            address: config.vault,
+            abi: jobVaultAbi,
+            functionName: "fund",
+            args: [vaultJobId, missing],
+          }),
+        );
+      }
+      const approver = await readContract(wagmiConfig, {
+        address: config.vault,
+        abi: jobVaultAbi,
+        functionName: "isApprover",
+        args: [vaultJobId, owner],
+      });
+      if (!approver) {
+        await send("Let your wallet approve payments", () =>
+          write({
+            address: config.vault,
+            abi: jobVaultAbi,
+            functionName: "setApprover",
+            args: [vaultJobId, owner, true],
+          }),
+        );
+      }
+      setStep("Waiting for Arc");
+    },
+    onSettled: () => {
+      setStep(null);
+      void queryClient.invalidateQueries({ queryKey: ["job", job.id] });
+    },
+  });
+
+  if (vaultJobId === null || job.status === "CLOSED" || missing <= 0n) return null;
+  return (
+    <Card>
+      <p className="font-medium">Finish setting up this job</p>
+      <p className="mt-1 text-sm text-muted">
+        It&apos;s open in the vault but holds {job.deposited} of its {job.budget} USDC. Your wallet
+        will ask you to allow and make the deposit, then to approve payments, skipping anything
+        already done.
+      </p>
+      <Button primary className="mt-3" disabled={finish.isPending} onClick={() => finish.mutate()}>
+        {finish.isPending ? `${step ?? "Working"}…` : "Finish setup"}
+      </Button>
+      <ErrorLine error={finish.error} />
+    </Card>
   );
 }
 

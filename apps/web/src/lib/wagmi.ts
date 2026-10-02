@@ -1,5 +1,5 @@
 import { arc, arcTestnet } from "viem/chains";
-import { createConfig, http } from "wagmi";
+import { createConfig, fallback, http } from "wagmi";
 import { injected, walletConnect } from "wagmi/connectors";
 import { config } from "./config.js";
 
@@ -25,8 +25,12 @@ export const wagmiConfig = createConfig({
         ]
       : []),
   ],
-  // One chain per build (see config.ts); both are listed so either build type-checks.
-  transports: { [arc.id]: http(), [arcTestnet.id]: http() },
+  // One chain per build (see config.ts); both are listed so either build type-checks. Every public
+  // RPC the chain lists, in turn: one flaky endpoint mustn't leave a wallet step waiting forever.
+  transports: {
+    [arc.id]: fallback(arc.rpcUrls.default.http.map((url) => http(url))),
+    [arcTestnet.id]: fallback(arcTestnet.rpcUrls.default.http.map((url) => http(url))),
+  },
 });
 
 declare module "wagmi" {

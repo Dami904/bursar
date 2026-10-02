@@ -11,7 +11,8 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("which Arc network the console is built for", () => {
+// The first fresh import of viem's chain list can take a while on a cold machine.
+describe("which Arc network the console is built for", { timeout: 30_000 }, () => {
   it("is testnet unless the build says mainnet", async () => {
     const config = await load({});
     expect(config).toMatchObject({ mainnet: false, explorer: "https://explorer.testnet.arc.io" });

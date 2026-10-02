@@ -3,7 +3,13 @@ import { ExternalLink } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { JobMenu, JobStatusCard } from "../components/JobActions.js";
-import { AgentsSection, BriefSection, displayName, PayeesSection } from "../components/JobSetup.js";
+import {
+  AgentsSection,
+  BriefSection,
+  displayName,
+  FinishSetup,
+  PayeesSection,
+} from "../components/JobSetup.js";
 import {
   BudgetBar,
   Button,
@@ -97,6 +103,8 @@ export function Job() {
           </p>
         )}
       </div>
+
+      <FinishSetup job={j} />
 
       {waiting.map((p) => (
         <ApprovalCard key={p.authorizationId} pending={p} />
