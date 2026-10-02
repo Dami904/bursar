@@ -121,6 +121,7 @@ describe("operator loop", () => {
             url: "https://seller.example/x",
             max_price: "0.05",
             reasoning: "needed for the brief",
+            alternatives: "none: the only allowed seller offering it",
           }),
         ]),
         turn([call("finish", { summary: "Bought one insight for 0.01." })]),
@@ -143,7 +144,8 @@ describe("operator loop", () => {
     expect(purchases[0]).toMatchObject({
       url: "https://seller.example/x",
       maxPrice: "0.05",
-      reasoning: "needed for the brief",
+      reasoning:
+        "needed for the brief Alternatives considered: none: the only allowed seller offering it",
     });
     expect(String(purchases[0]!.operationId)).toMatch(/^op-[0-9a-f]{12}-1$/);
     // 3 turns x (1000 in, 100 out) at $0.25 / $1.50 per million = 1,200 micro-USD.
@@ -161,7 +163,12 @@ describe("operator loop", () => {
     const provider = new ScriptedProvider([
       [
         turn([
-          call("purchase", { url: "https://seller.example/x", max_price: "0.05", reasoning: "r" }),
+          call("purchase", {
+            url: "https://seller.example/x",
+            max_price: "0.05",
+            reasoning: "r",
+            alternatives: "none: the only allowed seller offering it",
+          }),
         ]),
         turn([call("finish", { summary: "done" })]),
       ],
@@ -244,6 +251,7 @@ describe("marketplace", () => {
             max_price: "0.01",
             reasoning:
               "News search is what the brief needs; Serper fits and is the cheapest option",
+            alternatives: "Exa search costs 0.007 for the same news; Serper fits at 0.002",
           }),
         ]),
         turn([call("finish", { summary: "Searched the news for 0.002." })]),
@@ -278,6 +286,7 @@ describe("marketplace", () => {
             body_json: "{not json",
             max_price: "0.01",
             reasoning: "x",
+            alternatives: "none: the only allowed seller offering it",
           }),
           call("quote", { url: "https://np.orthogonal.com/serper/news", method: "DELETE" }),
         ]),
@@ -291,6 +300,41 @@ describe("marketplace", () => {
     expect(bad!.content).toContain("body_json must be valid JSON");
     expect(method!.content).toContain("method must be GET or POST");
     expect(purchases).toHaveLength(0);
+  });
+});
+
+describe("explaining a purchase", () => {
+  it("records what else was considered with the reason, and sends back a purchase without it", async () => {
+    const provider = new ScriptedProvider([
+      [
+        turn([
+          call("purchase", {
+            url: "https://seller.example/x",
+            max_price: "0.05",
+            reasoning: "The brief needs one insight",
+          }),
+        ]),
+        turn([
+          call("purchase", {
+            url: "https://seller.example/x",
+            max_price: "0.05",
+            reasoning: "The brief needs one insight",
+            alternatives: "Seller B asks 0.03 for the same insight; this one asks 0.01",
+          }),
+        ]),
+        turn([call("finish", { summary: "Bought one insight." })]),
+      ],
+    ]);
+    const { bursar, purchases } = fakeBursar();
+    await runOperator({ provider, bursar, brief: "Buy one insight" });
+
+    const [refused] = provider.sessions[0]!.results[0]!;
+    expect(refused!.isError).toBe(true);
+    expect(refused!.content).toContain("alternatives is required");
+    expect(purchases).toHaveLength(1);
+    expect(purchases[0]!.reasoning).toBe(
+      "The brief needs one insight Alternatives considered: Seller B asks 0.03 for the same insight; this one asks 0.01",
+    );
   });
 });
 
@@ -369,7 +413,12 @@ describe("helpers", () => {
       ],
       [
         turn([
-          call("purchase", { url: "https://seller.example/x", max_price: "0.02", reasoning: "r" }),
+          call("purchase", {
+            url: "https://seller.example/x",
+            max_price: "0.02",
+            reasoning: "r",
+            alternatives: "none: the only allowed seller offering it",
+          }),
         ]),
         turn([call("finish", { summary: "Bought." })]),
       ],
