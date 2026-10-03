@@ -10,6 +10,7 @@ import { SessionProvider, useSession } from "./lib/session.js";
 import { wagmiConfig } from "./lib/wagmi.js";
 import { Approvals } from "./pages/Approvals.js";
 import { Demo, DemoEvidence } from "./pages/Demo.js";
+import { DemoResult, ResultPage } from "./pages/Result.js";
 import { EvidencePage } from "./pages/Evidence.js";
 import { Job } from "./pages/Job.js";
 import { Jobs } from "./pages/Jobs.js";
@@ -58,6 +59,7 @@ createRoot(root).render(
               <Route path="/login" element={<SignIn />} />
               <Route path="/demo" element={<Demo />} />
               <Route path="/demo/decisions/:id" element={<DemoEvidence />} />
+              <Route path="/demo/results/:runId" element={<DemoResult />} />
               <Route path="/docs" element={<Navigate to="/docs/introduction" replace />} />
               <Route path="/docs/:slug" element={<Docs />} />
               <Route
@@ -71,6 +73,7 @@ createRoot(root).render(
                 <Route path="jobs" element={<Jobs />} />
                 <Route path="jobs/new" element={<NewJob />} />
                 <Route path="jobs/:id" element={<Job />} />
+                <Route path="jobs/:id/results/:runId" element={<ResultPage />} />
                 <Route path="approvals" element={<Approvals />} />
                 <Route path="decisions/:id" element={<EvidencePage />} />
                 <Route path="metrics" element={<MetricsPage />} />

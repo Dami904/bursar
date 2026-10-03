@@ -1,4 +1,4 @@
-import { credentials, jobs } from "@bursar/db";
+import { authorizations, credentials, jobs } from "@bursar/db";
 import { eq } from "drizzle-orm";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { createSiweMessage } from "viem/siwe";
@@ -293,5 +293,54 @@ describe("results", () => {
     const other = await seedJob();
     expect((await call("GET", `/jobs/${job.id}/runs`, other.ownerKey)).status).toBe(404);
     expect((await call("GET", `/jobs/${job.id}/runs`, agents[0]!.key)).status).toBe(403);
+  });
+});
+
+describe("a result page", () => {
+  it("shows one run's answer with only the purchases made for it, and what they cost", async () => {
+    const { agents, job, ownerKey } = await seedJob();
+    const agent = agents[0]!;
+    const report = (summary: string) =>
+      call("POST", "/spend/runs", agent.key, {
+        model: "gemini-test",
+        brief: "Research",
+        steps: 3,
+        inputTokens: 10,
+        outputTokens: 10,
+        costMicros: 1000,
+        outcome: "completed",
+        summary,
+      });
+    const before = await requestSpend(db, agent.principal, spend("0.10", "op-result-0001"));
+    await report("**First** answer");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const mine = await requestSpend(db, agent.principal, spend("0.20", "op-result-0002"));
+    await db
+      .update(authorizations)
+      .set({ state: "SETTLED" })
+      .where(eq(authorizations.id, mine.authorization!.id));
+    await report("Second answer");
+
+    const runs = (await call("GET", `/jobs/${job.id}/runs`, ownerKey)).body.runs as {
+      id: string;
+    }[];
+    const result = await call("GET", `/jobs/${job.id}/runs/${runs[0]!.id}`, ownerKey);
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ run: { summary: "Second answer" }, paid: "0.20" });
+    expect((result.body.purchases as { id: string }[]).map((d) => d.id)).toEqual([
+      mine.decision.id,
+    ]);
+    expect(
+      (result.body.purchases as { id: string }[]).some((d) => d.id === before.decision.id),
+    ).toBe(false);
+
+    const other = await seedJob();
+    expect((await call("GET", `/jobs/${job.id}/runs/${runs[0]!.id}`, other.ownerKey)).status).toBe(
+      404,
+    );
+    const demo = createApp(db, { demoJobId: job.id });
+    const pub = await demo.request(`/demo/runs/${runs[1]!.id}`);
+    expect(pub.status).toBe(200);
+    expect(await pub.json()).toMatchObject({ run: { summary: "**First** answer" } });
   });
 });

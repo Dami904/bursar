@@ -1,4 +1,4 @@
-import { formatUsdc } from "@bursar/money";
+import { formatUsdc, parseUsdc } from "@bursar/money";
 import {
   agents,
   approvals,
@@ -12,7 +12,7 @@ import {
   payees,
   type Db,
 } from "@bursar/db";
-import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { agentView, authorizationView, jobView } from "../http/views.js";
 import { notFound } from "../http/errors.js";
 import { getOwnedJob } from "./jobs.js";
@@ -59,7 +59,11 @@ export async function jobRuns(db: Db, ownerId: string, jobId: string, limit = 20
     .where(eq(operatorRuns.jobId, job.id))
     .orderBy(desc(operatorRuns.createdAt))
     .limit(limit);
-  return rows.map((r) => ({
+  return rows.map(runView);
+}
+
+function runView(r: typeof operatorRuns.$inferSelect) {
+  return {
     id: r.id,
     at: r.createdAt.toISOString(),
     outcome: r.outcome,
@@ -69,7 +73,47 @@ export async function jobRuns(db: Db, ownerId: string, jobId: string, limit = 20
     model: r.model,
     /** The AI model's cost in USD (not USDC paid on-chain). */
     aiCost: (Number(r.costMicros) / 1_000_000).toFixed(4),
-  }));
+  };
+}
+
+/**
+ * One result: the run, and what it bought to produce it. A run's purchases are the decisions its
+ * operator (and the helpers it started) made after the job's previous run and up to this one.
+ */
+export async function runResult(db: Db, ownerId: string, jobId: string, runId: string) {
+  const job = await getOwnedJob(db, ownerId, jobId);
+  const [run] = await db
+    .select()
+    .from(operatorRuns)
+    .where(and(eq(operatorRuns.jobId, job.id), eq(operatorRuns.id, runId)));
+  if (run === undefined) throw notFound("Result");
+  const [previous] = await db
+    .select({ at: operatorRuns.createdAt })
+    .from(operatorRuns)
+    .where(and(eq(operatorRuns.jobId, job.id), lt(operatorRuns.createdAt, run.createdAt)))
+    .orderBy(desc(operatorRuns.createdAt))
+    .limit(1);
+  const helpers = await db
+    .select({ id: agents.id })
+    .from(agents)
+    .where(eq(agents.parentAgentId, run.agentId));
+  const who = new Set([run.agentId, ...helpers.map((h) => h.id)]);
+  const from = previous?.at.getTime() ?? 0;
+  const to = run.createdAt.getTime();
+  const purchases = (await jobDecisions(db, ownerId, job.id, 500)).filter((d) => {
+    const at = new Date(d.at).getTime();
+    return who.has(d.agent.id) && at > from && at <= to;
+  });
+  const paid = purchases
+    .filter((d) => d.state === "SETTLED")
+    .reduce((sum, d) => sum + parseUsdc(d.amount), 0n);
+  return {
+    job: { id: job.id, title: job.title },
+    run: runView(run),
+    purchases,
+    /** USDC paid for this result (settled purchases only). */
+    paid: formatUsdc(paid),
+  };
 }
 
 /** A job's decisions, newest first, each with its payment's state and the payee's label. */

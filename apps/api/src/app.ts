@@ -61,6 +61,7 @@ import {
   jobPayees,
   jobRuns,
   listJobs,
+  runResult,
   marketplaceFilters,
   ownerFingerprint,
 } from "./services/console.js";
@@ -511,6 +512,12 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
     });
   });
 
+  app.get("/demo/runs/:runId", async (c) => {
+    const job = await demoJob();
+    // Only the demo job's results are public.
+    return c.json(await runResult(db, job.ownerId, job.id, c.req.param("runId")));
+  });
+
   app.get("/demo/decisions/:id", async (c) => {
     const job = await demoJob();
     const evidence = await decisionEvidence(db, job.ownerId, c.req.param("id"));
@@ -613,6 +620,12 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
   app.get("/jobs", async (c) => {
     const owner = require(c, "OWNER");
     return c.json({ jobs: await listJobs(db, owner.ownerId) });
+  });
+
+  /** One result: the run's answer and what it bought to produce it. */
+  app.get("/jobs/:id/runs/:runId", async (c) => {
+    const owner = require(c, "OWNER");
+    return c.json(await runResult(db, owner.ownerId, c.req.param("id"), c.req.param("runId")));
   });
 
   /** What the AI operator produced for this job: each run's answer, newest first. */
