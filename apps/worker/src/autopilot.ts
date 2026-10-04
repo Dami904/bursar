@@ -126,7 +126,7 @@ export async function autopilotOnce(deps: AutopilotDeps): Promise<string | null>
   }
   const history = await recentHistory(db, claimed.id);
   if (history !== "") {
-    brief += `\n\nWhat earlier runs on this job already did (don't repeat a purchase unless the brief asks for more):\n${history}`;
+    brief += `\n\nWhat earlier runs on this job already did. If a paid purchase here already delivered what the brief asks for, don't buy it again: finish by saying which earlier purchase (when, what, price) delivered it and that the owner can open it from the job's results. Only buy again if the brief asks for more:\n${history}`;
   }
 
   deps.running.add(claimed.id);
