@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
+import { Link } from "react-router";
 import { AgentsSection, PayeesSection, type Payee } from "../components/JobSetup.js";
 import { Results } from "../components/Results.js";
-import { BudgetBar, ErrorLine, Loading } from "../components/ui.js";
-import { api, type Agent, type Decision, type Job, type Run } from "../lib/api.js";
+import { BudgetBar, Button, Loading } from "../components/ui.js";
+import { api, ApiError, type Agent, type Decision, type Job, type Run } from "../lib/api.js";
 import { addressUrl, config, txUrl } from "../lib/config.js";
 import { money } from "../lib/format.js";
 import { DecisionRow } from "./Job.js";
@@ -35,16 +36,57 @@ export function Demo() {
     <div className="min-h-dvh bg-bg">
       <SiteHeader />
       <main className="mx-auto max-w-5xl px-5 pb-24 pt-8">
-        <div className="mb-8 rounded-2xl border border-seal bg-seal-bg px-4 py-3 text-sm text-seal-text">
-          A real job on Arc {config.mainnet ? "mainnet, spending real USDC" : "testnet"}, run by
-          Bursar's own AI operator. Every transaction opens on the chain. Payments above 0.10 USDC
-          are approved by a demo approver after a minute.
-        </div>
+        {q.data && (
+          <div className="mb-8 rounded-2xl border border-seal bg-seal-bg px-4 py-3 text-sm text-seal-text">
+            A real job on Arc {config.mainnet ? "mainnet, spending real USDC" : "testnet"}, run by
+            Bursar's own AI operator. Every transaction opens on the chain. Payments above 0.10 USDC
+            are approved by a demo approver after a minute.
+          </div>
+        )}
         {q.isPending && <Loading />}
-        <ErrorLine error={q.error} />
+        {q.error && <DemoUnavailable error={q.error} onRetry={() => void q.refetch()} />}
         {q.data && <DemoJob data={q.data} />}
       </main>
       <Footer />
+    </div>
+  );
+}
+
+/**
+ * What a visitor sees when there's no demo to show: no demo job is set up on this network yet, or
+ * the server can't be reached. Said plainly, with somewhere to go, instead of an error code.
+ */
+export function DemoUnavailable({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  const missing = error instanceof ApiError && error.status === 404;
+  return (
+    <div className="mx-auto max-w-xl rounded-2xl border border-line bg-surface p-8 text-center">
+      <h1 className="text-xl font-medium">
+        {missing ? "The live demo is being set up" : "The demo isn't answering right now"}
+      </h1>
+      <p className="mt-3 text-muted">
+        {missing
+          ? "A fresh demo job is being funded on Arc. It will run on its own once it's live."
+          : "The server may be waking up. Give it a moment and try again."}
+      </p>
+      <div className="mt-6 flex flex-wrap justify-center gap-3">
+        {!missing && (
+          <Button primary onClick={onRetry}>
+            Try again
+          </Button>
+        )}
+        <Link
+          to="/docs/introduction"
+          className="inline-flex items-center rounded-full border border-line px-4 py-2 text-sm font-medium hover:bg-bg"
+        >
+          How it works
+        </Link>
+        <Link
+          to="/"
+          className="inline-flex items-center rounded-full border border-line px-4 py-2 text-sm font-medium hover:bg-bg"
+        >
+          Back to the start
+        </Link>
+      </div>
     </div>
   );
 }

@@ -87,9 +87,9 @@ export function EvidencePage({ demo = false }: { demo?: boolean }) {
         <div className="min-w-0">
           <h1 className="mt-4 text-xl font-medium">{verdict.headline}</h1>
           <div className="mt-3 flex items-start justify-between gap-3">
-            <div>
+            <div className="min-w-0">
               <p className="text-3xl font-medium tracking-tight">{money(d.amount)}</p>
-              <p className="text-muted">
+              <p className="break-words text-muted">
                 to{" "}
                 {d.kind === "INVOICE"
                   ? `${shortAddress(d.payee)} · invoice ${d.invoiceRef ?? ""}`

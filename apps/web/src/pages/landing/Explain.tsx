@@ -18,7 +18,7 @@ export function OneRule() {
     { label: "− stuck, outcome unknown", value: "0.00", tone: "text-stuck" },
   ];
   return (
-    <section className="mx-auto grid max-w-6xl items-center gap-14 px-5 py-28 md:grid-cols-2">
+    <section className="mx-auto grid max-w-6xl items-center gap-14 overflow-x-clip px-5 py-28 md:grid-cols-2">
       <div>
         <p className="text-xs font-medium uppercase tracking-[0.2em] text-seal">The one rule</p>
         <h2 className="mt-3 text-4xl font-medium tracking-[-0.03em] sm:text-5xl">
@@ -66,7 +66,7 @@ export function OneRule() {
             className={`reveal ${inView ? "in" : ""} mt-5 text-center`}
             style={{ animationDelay: "1900ms" }}
           >
-            <span className="animate-stamp inline-block rounded-md border-2 border-seal px-3 py-1 text-[11px] tracking-[0.25em] text-seal-text [animation-delay:2s]">
+            <span className="animate-stamp inline-block max-w-full rounded-md border-2 border-seal px-3 py-1 text-[11px] tracking-[0.12em] text-seal-text [animation-delay:2s] sm:tracking-[0.25em]">
               CHECKED BEFORE MONEY MOVES
             </span>
           </p>

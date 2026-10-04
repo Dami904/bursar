@@ -29,16 +29,17 @@ export function Shell() {
 
   return (
     <div className="mx-auto min-h-dvh max-w-5xl px-4 pb-16 sm:px-6">
-      <header className="flex items-center justify-between gap-3 py-5">
-        <div className="flex items-center gap-5">
+      <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 py-5">
+        {/* On a phone these three sit in the header's own rows: logo, then icons, then the tabs. */}
+        <div className="contents sm:flex sm:items-center sm:gap-5">
           <NavLink
             to={owner ? "/app/jobs" : "/app/approvals"}
-            className="flex items-center gap-2 font-medium"
+            className="order-1 flex items-center gap-2 font-medium sm:order-none"
           >
             <Logo /> Bursar
           </NavLink>
           <NetworkBadge />
-          <nav className="flex items-center gap-1">
+          <nav className="order-4 flex w-full items-center gap-1 overflow-x-auto sm:order-none sm:w-auto sm:overflow-visible">
             {owner && (
               <NavLink to="/app/jobs" className={navClass}>
                 Jobs
@@ -64,7 +65,7 @@ export function Shell() {
             )}
           </nav>
         </div>
-        <div className="flex items-center gap-2 text-sm text-muted">
+        <div className="order-3 ml-auto flex items-center gap-2 text-sm text-muted sm:order-none sm:ml-0">
           {session && <WalletPill wallet={session.wallet} live={live} />}
           {owner && (
             <NavLink
@@ -102,7 +103,7 @@ export function Shell() {
  */
 function NetworkBadge() {
   return (
-    <span className="flex items-center gap-2">
+    <span className="order-2 flex items-center gap-2 sm:order-none">
       <NetworkLabel />
       {config.otherNetworkUrl !== undefined && (
         <a

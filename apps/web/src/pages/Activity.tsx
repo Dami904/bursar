@@ -237,7 +237,7 @@ function DaybookLine({
           }
         }}
         className={`flex items-center gap-3 border-l-2 px-2 py-3 hover:bg-surface ${
-          active ? "lg:border-ink" : "border-transparent"
+          active ? "border-transparent lg:border-ink" : "border-transparent"
         }`}
       >
         <span className="w-11 shrink-0 font-mono text-xs text-muted">{clock(d.at)}</span>
