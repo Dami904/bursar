@@ -374,6 +374,11 @@ export const authorizations = pgTable(
     paymentRequirements: jsonb("payment_requirements"),
     /** The paid response body, capped in size, returned to the agent. */
     deliverable: text("deliverable"),
+    /**
+     * Images, audio and video in the deliverable, kept in our own storage: [{ url, kind,
+     * contentType, bytes }]. Null until the worker has looked; empty when there was nothing to keep.
+     */
+    media: jsonb("media"),
     attempts: integer("attempts").notNull().default(0),
     nextAttemptAt: at("next_attempt_at"),
     lastError: text("last_error"),

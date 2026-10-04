@@ -128,6 +128,14 @@ export interface Run {
   aiCost: string;
 }
 
+/** An image, audio or video a seller delivered, kept by us. */
+export interface MediaItem {
+  url: string;
+  kind: "image" | "audio" | "video";
+  contentType: string;
+  bytes: number;
+}
+
 export interface Decision {
   id: string;
   at: string;
@@ -144,6 +152,8 @@ export interface Decision {
   authorizationId: string | null;
   paymentUrl: string | null;
   paymentTx: string | null;
+  /** Images, audio and video the seller delivered. */
+  media?: MediaItem[];
   /** VAULT (on-chain per payment) or GATEWAY (Circle Gateway nano payment). */
   rail?: "VAULT" | "GATEWAY" | null;
 }

@@ -252,7 +252,23 @@ export function localWallets(chain: Chainside): WalletProvider {
   };
 }
 
-export type SellerMode = "normal" | "refuse" | "settle-then-crash" | "drop";
+/** A 1×1 PNG. */
+export const TINY_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64",
+);
+
+export type SellerMode =
+  | "normal"
+  | "refuse"
+  | "settle-then-crash"
+  | "drop"
+  /** Takes the order, answers 202 with a ticket on its own host, charges on the first ready poll. */
+  | "async"
+  /** As "async", but the ticket points at another host. */
+  | "async-elsewhere"
+  /** As "async", but the result never becomes ready. */
+  | "async-never";
 
 export interface SeenRequest {
   readonly method: string | undefined;
@@ -265,6 +281,8 @@ export interface LocalSeller {
   /** Every request the seller received, in order: what method and body each one carried. */
   readonly requests: SeenRequest[];
   mode: SellerMode;
+  /** For the async modes: how many polls answer "in progress" before the result is ready. */
+  pollsBeforeReady: number;
   stop(): void;
 }
 
@@ -279,13 +297,23 @@ export async function startSeller(
 ): Promise<LocalSeller> {
   const facilitator = chain.wallet(accounts.facilitator);
   let url = "";
-  const state: { mode: SellerMode } = { mode: "normal" };
+  const state: { mode: SellerMode; pollsBeforeReady: number } = {
+    mode: "normal",
+    pollsBeforeReady: 1,
+  };
+  let polls = 0;
   const requests: SeenRequest[] = [];
   const server: Server = createServer((req, res) => {
     // "drop": the connection dies before anything is read, as if the seller were down.
     if (state.mode === "drop") {
       req.socket.destroy();
       return;
+    }
+    // Files a result can link to: a picture, and a page that isn't media.
+    if (req.url === "/pic.png" || req.url === "/page.html") {
+      const png = req.url === "/pic.png";
+      res.writeHead(200, { "content-type": png ? "image/png" : "text/html" });
+      return res.end(png ? TINY_PNG : "<html>hello</html>");
     }
     void (async () => {
       const header = req.headers["payment-signature"];
@@ -319,6 +347,21 @@ export async function startSeller(
         });
         return res.end("{}");
       }
+      const asyncMode = state.mode.startsWith("async");
+      if (asyncMode && req.method === "POST") {
+        // Order checked, not charged: a ticket to collect the result with.
+        polls = 0;
+        const ticket = state.mode === "async-elsewhere" ? "http://127.0.0.2:9/jobs/1" : "/jobs/1";
+        res.writeHead(202, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ id: "1", status: "queued", poll_url: ticket }));
+      }
+      if (asyncMode && req.method === "GET") {
+        polls += 1;
+        if (state.mode === "async-never" || polls <= state.pollsBeforeReady) {
+          res.writeHead(200, { "content-type": "application/json" });
+          return res.end('{"id":"1","status":"in_progress"}');
+        }
+      }
       const payment = decodePaymentSignatureHeader(header);
       const auth = (payment.payload as { authorization: Record<string, string> }).authorization;
       const signature = parseSignature((payment.payload as { signature: Hex }).signature);
@@ -351,7 +394,7 @@ export async function startSeller(
           payer: auth.from!,
         }),
       });
-      res.end('{"insight":"paid"}');
+      res.end(asyncMode ? '{"id":"1","status":"completed"}' : '{"insight":"paid"}');
     })().catch((error: unknown) => {
       res.writeHead(500);
       res.end(String(error));
@@ -367,6 +410,12 @@ export async function startSeller(
     },
     set mode(mode: SellerMode) {
       state.mode = mode;
+    },
+    get pollsBeforeReady() {
+      return state.pollsBeforeReady;
+    },
+    set pollsBeforeReady(n: number) {
+      state.pollsBeforeReady = n;
     },
     stop: () => server.close(),
   };

@@ -78,6 +78,48 @@ export interface StoredPayment {
   readonly request?: PaidRequest;
   /** The signed x402 header, kept so a retry resends the same payment (same nonce). */
   readonly signedHeader?: string;
+  /**
+   * An asynchronous seller's ticket: the order was taken (202) and the result is collected, and
+   * charged once, by sending the same signed payment here. Always on the seller's own host.
+   */
+  readonly pollUrl?: string;
+  /** When the seller first handed back the ticket (ISO time): the polling limit counts from here. */
+  readonly pollingSince?: string;
+}
+
+/** How long a ticket is polled before the purchase is given up (the payment is then held). */
+const POLL_LIMIT_MS = 10 * 60_000;
+const POLL_DELAY_MS = 5_000;
+const TICKET_FAILED = new Set(["failed", "error", "cancelled", "canceled", "expired", "rejected"]);
+
+/**
+ * Where an asynchronous seller said the result will be, if it's on the seller's own host (any other
+ * host could be a way to send the job's signed payment to a stranger). `failed` is true when the
+ * answer says the order has failed, so there's nothing to wait for.
+ */
+export function ticketOf(
+  body: string | undefined,
+  paymentUrl: string,
+): { readonly url: string | null; readonly failed: boolean } {
+  if (body === undefined) return { url: null, failed: false };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return { url: null, failed: false };
+  }
+  if (typeof parsed !== "object" || parsed === null) return { url: null, failed: false };
+  const fields = parsed as { poll_url?: unknown; status?: unknown };
+  const failed =
+    typeof fields.status === "string" && TICKET_FAILED.has(fields.status.toLowerCase());
+  if (typeof fields.poll_url !== "string") return { url: null, failed };
+  try {
+    const base = new URL(paymentUrl);
+    const ticket = new URL(fields.poll_url, base);
+    return { url: ticket.origin === base.origin ? ticket.href : null, failed };
+  } catch {
+    return { url: null, failed };
+  }
 }
 
 /**
@@ -426,9 +468,12 @@ async function pay(deps: ExecutorDeps, auth: AuthorizationRow, logger: Logger): 
   }
 
   await assertRequestUnchanged(deps, auth);
-  const outcome = await sendPayment(auth.paymentUrl, stored.signedHeader, {
+  const outcome = await sendPayment(stored.pollUrl ?? auth.paymentUrl, stored.signedHeader, {
     allowPrivateHosts: deps.allowPrivateHosts === true,
-    ...(stored.request === undefined ? {} : { request: stored.request }),
+    // Collecting a ticket is a plain GET; the order itself is sent as it was quoted.
+    ...(stored.request === undefined || stored.pollUrl !== undefined
+      ? {}
+      : { request: stored.request }),
   });
   switch (outcome.kind) {
     case "PAID": {
@@ -468,22 +513,9 @@ async function pay(deps: ExecutorDeps, auth: AuthorizationRow, logger: Logger): 
         body: outcome.body.slice(0, 300),
       });
       return "wait";
-    case "UNKNOWN": {
-      const attempts = auth.attempts + 1;
-      logger.warn("payment outcome unknown", { reason: outcome.reason, attempts });
-      if (attempts >= MAX_PAYMENT_ATTEMPTS) {
-        await unresolved(deps, auth, `No answer from the seller after ${attempts} tries`);
-      } else {
-        await annotate(deps.db, auth.id, {
-          attempts,
-          lastError: outcome.reason,
-          nextAttemptAt: new Date(Date.now() + RETRY_DELAY_MS),
-          // A "working on it" answer (202) often says where the result will be: keep it.
-          ...(outcome.body === undefined ? {} : { deliverable: outcome.body }),
-        });
-      }
+    case "UNKNOWN":
+      await pending(deps, auth, stored, outcome, "payment", logger);
       return "wait";
-    }
   }
 }
 
@@ -582,9 +614,12 @@ async function payGateway(
   }
 
   await assertRequestUnchanged(deps, auth);
-  const outcome = await sendPayment(auth.paymentUrl, stored.signedHeader, {
+  const outcome = await sendPayment(stored.pollUrl ?? auth.paymentUrl, stored.signedHeader, {
     allowPrivateHosts: deps.allowPrivateHosts === true,
-    ...(stored.request === undefined ? {} : { request: stored.request }),
+    // Collecting a ticket is a plain GET; the order itself is sent as it was quoted.
+    ...(stored.request === undefined || stored.pollUrl !== undefined
+      ? {}
+      : { request: stored.request }),
   });
   switch (outcome.kind) {
     case "PAID": {
@@ -629,22 +664,73 @@ async function payGateway(
         body: outcome.body.slice(0, 300),
       });
       return "wait";
-    case "UNKNOWN": {
-      const attempts = auth.attempts + 1;
-      logger.warn("gateway payment outcome unknown", { reason: outcome.reason, attempts });
-      if (attempts >= MAX_PAYMENT_ATTEMPTS) {
-        await unresolved(deps, auth, `No answer from the seller after ${attempts} tries`);
-      } else {
-        await annotate(deps.db, auth.id, {
-          attempts,
-          lastError: outcome.reason,
-          nextAttemptAt: new Date(Date.now() + RETRY_DELAY_MS),
-          // A "working on it" answer (202) often says where the result will be: keep it.
-          ...(outcome.body === undefined ? {} : { deliverable: outcome.body }),
-        });
-      }
+    case "UNKNOWN":
+      await pending(deps, auth, stored, outcome, "gateway payment", logger);
       return "wait";
+  }
+}
+
+/**
+ * A payment that didn't come back with a receipt. An asynchronous seller's "working on it" with a
+ * ticket on its own host isn't a failure: the same signed payment is sent to the ticket until the
+ * result is ready (the seller charges once, then), within POLL_LIMIT_MS. Anything else counts as a
+ * try, and after MAX_PAYMENT_ATTEMPTS the payment is held as unresolved.
+ */
+async function pending(
+  deps: ExecutorDeps,
+  auth: AuthorizationRow,
+  stored: StoredPayment,
+  outcome: { readonly reason: string; readonly body?: string },
+  label: string,
+  logger: Logger,
+): Promise<void> {
+  const ticket = ticketOf(outcome.body, auth.paymentUrl as string);
+  const url = ticket.url ?? stored.pollUrl ?? null;
+  if (url !== null && !ticket.failed) {
+    const since = stored.pollingSince === undefined ? Date.now() : Date.parse(stored.pollingSince);
+    if (Date.now() - since > POLL_LIMIT_MS) {
+      await unresolved(
+        deps,
+        auth,
+        "The result wasn't ready in time. The seller hasn't charged for it; the signed payment is held until it expires",
+      );
+      logger.warn(`${label}: result not ready in time`, { url });
+      return;
     }
+    logger.info(`${label}: waiting for the seller's result`, { url });
+    await annotate(deps.db, auth.id, {
+      attempts: 0,
+      lastError: outcome.reason,
+      nextAttemptAt: new Date(Date.now() + POLL_DELAY_MS),
+      paymentRequirements: {
+        ...stored,
+        pollUrl: url,
+        pollingSince: stored.pollingSince ?? new Date().toISOString(),
+      },
+      ...(outcome.body === undefined ? {} : { deliverable: outcome.body }),
+    });
+    return;
+  }
+  if (ticket.failed) {
+    await unresolved(
+      deps,
+      auth,
+      "The seller reported that the order failed. It hasn't charged; the signed payment is held until it expires",
+    );
+    return;
+  }
+  const attempts = auth.attempts + 1;
+  logger.warn(`${label} outcome unknown`, { reason: outcome.reason, attempts });
+  if (attempts >= MAX_PAYMENT_ATTEMPTS) {
+    await unresolved(deps, auth, `No answer from the seller after ${attempts} tries`);
+  } else {
+    await annotate(deps.db, auth.id, {
+      attempts,
+      lastError: outcome.reason,
+      nextAttemptAt: new Date(Date.now() + RETRY_DELAY_MS),
+      // A "working on it" answer (202) often says where the result will be: keep it.
+      ...(outcome.body === undefined ? {} : { deliverable: outcome.body }),
+    });
   }
 }
 

@@ -25,6 +25,7 @@
     "@bursar/payments": "workspace:*",
     "@bursar/policy": "workspace:*",
     "@circle-fin/developer-controlled-wallets": "10.8.1",
+    "@vercel/blob": "^2.8.0",
     "@x402/core": "2.27.0",
     "drizzle-orm": "0.45.3",
     "viem": "^2.56.9",

@@ -112,6 +112,8 @@ export function authorizationView(auth: typeof authorizations.$inferSelect) {
     paymentTx: auth.paymentTx,
     gatewayTransferId: auth.gatewayTransferId,
     deliverable: auth.deliverable,
+    /** Images, audio and video the seller delivered, kept by us: { url, kind, contentType, bytes }. */
+    media: Array.isArray(auth.media) ? auth.media : [],
     reason: auth.resolvedReason,
     updatedAt: auth.updatedAt.toISOString(),
   };

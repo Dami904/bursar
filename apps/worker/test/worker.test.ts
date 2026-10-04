@@ -36,6 +36,7 @@ import { executeOnce, type ExecutorDeps } from "../src/executor.js";
 import { floatsOnce, floatSize } from "../src/floats.js";
 import { resetWithdrawScan, withdrawOnce } from "../src/withdrawals.js";
 import { indexOnce } from "../src/indexer.js";
+import { keepMediaOnce } from "../src/media.js";
 import { reconcileOnce } from "../src/reconciler.js";
 import {
   accounts,
@@ -44,9 +45,11 @@ import {
   startChain,
   startGateway,
   startSeller,
+  TINY_PNG,
   type Chainside,
   type LocalGateway,
   type LocalSeller,
+  type SellerMode,
 } from "./harness.js";
 
 let chain: Chainside;
@@ -85,6 +88,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   seller.mode = "normal";
+  seller.pollsBeforeReady = 1;
   gateway.mode = "normal";
   gateway.transfers.length = 0;
   gateway.withdrawals.length = 0;
@@ -315,6 +319,158 @@ describe("sellers that take a POST body", () => {
     for (const call of calls) {
       expect(call).toMatchObject({ method: "POST", body: '{"query":"agent budgets"}' });
     }
+  });
+});
+
+describe("sellers that deliver later (a ticket to collect with)", () => {
+  /** Skips the retry back-off between ticks. */
+  const ticker = (id: string) => async () => {
+    await db.update(authorizations).set({ nextAttemptAt: null }).where(eq(authorizations.id, id));
+    await executeOnce(deps);
+  };
+
+  it("collects the result with the same payment, and the seller is paid once", async () => {
+    const { principal } = await liveJob();
+    seller.mode = "async";
+    seller.pollsBeforeReady = 2;
+    const request = paidRequest("POST", { prompt: "a red door" });
+    const before = seller.requests.length;
+    const sellerBefore = await chain.balanceOf(accounts.seller.address);
+    const auth = await purchase(principal, "op-async-000001", seller, request);
+
+    const done = await runUntil(auth.id, ["SETTLED", "UNRESOLVED"], ticker(auth.id));
+    expect(done.state).toBe("SETTLED");
+    expect(done.deliverable).toBe('{"id":"1","status":"completed"}');
+    expect(await chain.balanceOf(accounts.seller.address)).toBe(sellerBefore + PRICE);
+    // The order was a POST; every pickup was a GET of the ticket.
+    const calls = seller.requests.slice(before);
+    expect(calls.filter((r) => r.method === "POST" && r.paid)).toHaveLength(1);
+    expect(calls.filter((r) => r.method === "GET").length).toBeGreaterThanOrEqual(3);
+  });
+
+  /**
+   * A seller whose signed payments expire after 5 seconds, so a held payment's return to the vault
+   * is checked without time travel (and the shared job wallet is left empty for later tests).
+   */
+  async function quickAsync(mode: SellerMode) {
+    const quick = await startSeller(chain, PRICE, 5);
+    quick.mode = mode;
+    const { job, principal } = await liveJob();
+    await addPayee(db, job.ownerId, job.id, { kind: "X402_ORIGIN", value: quick.url });
+    return { quick, job, principal };
+  }
+  async function expectReturned(id: string, vaultJobId: string) {
+    await new Promise((resolve) => setTimeout(resolve, 6_000)); // past validBefore
+    await chain.mine();
+    expect((await runUntil(id, ["RELEASED"], reconcile, 6)).state).toBe("RELEASED");
+    expect(await chain.balanceOf(accounts.jobWallet.address)).toBe(0n);
+    expect(await vaultAvailable(vaultJobId)).toBe(parseUsdc("1.00"));
+  }
+
+  it("never sends the payment to a ticket on another host", async () => {
+    const { quick, job, principal } = await quickAsync("async-elsewhere");
+    const auth = await purchase(principal, "op-async-000002", quick, paidRequest("POST", {}));
+    const done = await runUntil(auth.id, ["SETTLED", "UNRESOLVED"], ticker(auth.id));
+    expect(done.state).toBe("UNRESOLVED");
+    expect((done.paymentRequirements as { pollUrl?: string }).pollUrl).toBeUndefined();
+    // Nothing was ever sent to the other host; the order's payment comes back once it expires.
+    expect(quick.requests.filter((r) => r.method === "GET")).toHaveLength(0);
+    await expectReturned(auth.id, job.vaultJobId!);
+    quick.stop();
+  });
+
+  it("stops waiting at the limit and holds the payment until it can't be used", async () => {
+    const { quick, job, principal } = await quickAsync("async-never");
+    const auth = await purchase(principal, "op-async-000003", quick, paidRequest("POST", {}));
+    const tick = ticker(auth.id);
+    await runUntil(auth.id, ["SIGNING"], tick);
+    await tick();
+    await tick();
+    // The seller handed back its ticket 11 minutes ago.
+    const [row] = await db.select().from(authorizations).where(eq(authorizations.id, auth.id));
+    expect((row!.paymentRequirements as { pollUrl?: string }).pollUrl).toBe(`${quick.url}/jobs/1`);
+    await db
+      .update(authorizations)
+      .set({
+        paymentRequirements: {
+          ...(row!.paymentRequirements as Record<string, unknown>),
+          pollingSince: new Date(Date.now() - 11 * 60_000).toISOString(),
+        },
+      })
+      .where(eq(authorizations.id, auth.id));
+    const done = await runUntil(auth.id, ["SETTLED", "UNRESOLVED"], tick);
+    expect(done.state).toBe("UNRESOLVED");
+    expect(done.resolvedReason).toContain("wasn't ready in time");
+    await expectReturned(auth.id, job.vaultJobId!);
+    quick.stop();
+  });
+});
+
+describe("keeping delivered media", () => {
+  /** A settled purchase whose answer is `answer` (the seller's answer is replaced after the fact). */
+  async function settledWith(op: string, answer: unknown) {
+    const { principal } = await liveJob();
+    const auth = await purchase(principal, op);
+    await runUntil(auth.id, ["SETTLED"]);
+    await db
+      .update(authorizations)
+      .set({ deliverable: JSON.stringify(answer), media: null })
+      .where(eq(authorizations.id, auth.id));
+    return auth.id;
+  }
+  const saved: string[] = [];
+  const store = async (path: string, bytes: Uint8Array, contentType: string) => {
+    saved.push(`${path} ${contentType} ${bytes.byteLength}`);
+    return `https://blob.test/${path}`;
+  };
+  const mediaOf = async (id: string) =>
+    (await db.select().from(authorizations).where(eq(authorizations.id, id)))[0]!.media;
+
+  it("downloads an image once and stores it, leaving a page link alone", async () => {
+    saved.length = 0;
+    const id = await settledWith("op-media-000001", {
+      data: [{ url: `${seller.url}/pic.png` }, { url: `${seller.url}/page.html` }],
+    });
+    await keepMediaOnce({ db, store, allowPrivateHosts: true });
+    expect(await mediaOf(id)).toEqual([
+      {
+        url: `https://blob.test/media/${id}/0.png`,
+        kind: "image",
+        contentType: "image/png",
+        bytes: TINY_PNG.byteLength,
+      },
+    ]);
+    expect(saved).toHaveLength(1);
+    // Looked at once: a second pass doesn't fetch or store again.
+    await keepMediaOnce({ db, store, allowPrivateHosts: true });
+    expect(saved).toHaveLength(1);
+  });
+
+  it("keeps an image the seller returned inline (base64)", async () => {
+    const id = await settledWith("op-media-000002", {
+      b64_json: TINY_PNG.toString("base64"),
+    });
+    await keepMediaOnce({ db, store, allowPrivateHosts: true });
+    expect(await mediaOf(id)).toMatchObject([{ kind: "image", contentType: "image/png" }]);
+  });
+
+  it("refuses a file over the size limit", async () => {
+    const id = await settledWith("op-media-000003", { url: `${seller.url}/pic.png` });
+    await keepMediaOnce({ db, store, allowPrivateHosts: true, maxBytes: 10 });
+    expect(await mediaOf(id)).toEqual([]);
+  });
+
+  it("never fetches a private address", async () => {
+    const id = await settledWith("op-media-000004", { url: `${seller.url}/pic.png` });
+    await keepMediaOnce({ db, store, allowPrivateHosts: false });
+    // The link is on 127.0.0.1: refused outright, and nothing was stored.
+    expect(await mediaOf(id)).toEqual([]);
+  });
+
+  it("does nothing without a store", async () => {
+    const id = await settledWith("op-media-000005", { url: `${seller.url}/pic.png` });
+    await keepMediaOnce({ db, store: null, allowPrivateHosts: true });
+    expect(await mediaOf(id)).toBeNull();
   });
 });
 

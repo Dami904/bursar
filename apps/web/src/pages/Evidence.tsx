@@ -3,7 +3,8 @@ import { ExternalLink } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { Button, ErrorLine, Loading, Status } from "../components/ui.js";
-import { api, type PaymentState } from "../lib/api.js";
+import { MediaGallery } from "../components/Media.js";
+import { api, type MediaItem, type PaymentState } from "../lib/api.js";
 import { txUrl } from "../lib/config.js";
 import {
   blockedBecause,
@@ -36,6 +37,9 @@ interface Evidence {
     vaultTx: string | null;
     paymentTx: string | null;
     gatewayTransferId?: string | null;
+    /** What the seller answered, as text. */
+    deliverable?: string | null;
+    media?: MediaItem[];
     reason: string | null;
   } | null;
   approval: {
@@ -139,6 +143,11 @@ export function EvidencePage({ demo = false }: { demo?: boolean }) {
             <TxLink hash={e.payment.paymentTx} />
           </Step>
         )}
+        {e.payment?.media && e.payment.media.length > 0 && (
+          <Step tone="paid" title="Delivered">
+            <MediaGallery items={e.payment.media} />
+          </Step>
+        )}
         {e.payment?.reason && <Step tone="muted" title="Note" meta={e.payment.reason} />}
         {e.audit.length > 0 && (
           <Step
@@ -155,6 +164,17 @@ export function EvidencePage({ demo = false }: { demo?: boolean }) {
         )}
       </ol>
 
+      {e.payment?.deliverable && (
+        <details className="mt-8 border-t border-line pt-4 text-sm">
+          <summary className="cursor-pointer text-muted">
+            Technical details: the seller's answer
+          </summary>
+          <pre className="mt-2 max-h-80 overflow-auto rounded-xl border border-line bg-track p-3 text-xs">
+            {prettyJson(e.payment.deliverable)}
+          </pre>
+        </details>
+      )}
+
       {e.audit.length > 0 && (
         <div className="mt-8 flex items-center justify-between gap-3 border-t border-line pt-4">
           <span className="text-sm text-muted">
@@ -170,6 +190,14 @@ export function EvidencePage({ demo = false }: { demo?: boolean }) {
       )}
     </main>
   );
+}
+
+function prettyJson(text: string): string {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return text;
+  }
 }
 
 function Step({

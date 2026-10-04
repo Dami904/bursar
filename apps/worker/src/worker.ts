@@ -14,6 +14,7 @@ import { executeOnce } from "./executor.js";
 import { floatsOnce } from "./floats.js";
 import { indexOnce } from "./indexer.js";
 import { log } from "./log.js";
+import { blobStore, keepMediaOnce } from "./media.js";
 import { reconcileOnce } from "./reconciler.js";
 import { withdrawOnce } from "./withdrawals.js";
 
@@ -53,6 +54,8 @@ export async function startWorker(env: WorkerEnv): Promise<RunningWorker | null>
     transport,
     account: privateKeyToAccount(env.OPERATOR_PRIVATE_KEY as Hex),
   });
+  const mediaStore =
+    env.BLOB_READ_WRITE_TOKEN === undefined ? null : blobStore(env.BLOB_READ_WRITE_TOKEN);
   const wallets = new CircleWalletProvider({
     apiKey: env.CIRCLE_API_KEY,
     entitySecret: env.CIRCLE_ENTITY_SECRET,
@@ -188,6 +191,15 @@ export async function startWorker(env: WorkerEnv): Promise<RunningWorker | null>
         });
       } catch (error) {
         log.error("executor tick failed", error);
+      }
+      try {
+        await keepMediaOnce({
+          db,
+          store: mediaStore,
+          allowPrivateHosts: env.ALLOW_PRIVATE_PAYEES === "true",
+        });
+      } catch (error) {
+        log.error("media tick failed", error);
       }
       try {
         await reconcileOnce({

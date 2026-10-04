@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router";
 import { Markdown } from "../components/Markdown.js";
+import { MediaGallery } from "../components/Media.js";
 import { OUTCOME } from "../components/Results.js";
 import { ErrorLine, Loading } from "../components/ui.js";
 import { api, type Decision, type Run } from "../lib/api.js";
@@ -30,6 +31,8 @@ export function ResultPage({ demo = false }: { demo?: boolean }) {
   if (q.isPending) return <Loading />;
   if (q.error) return <ErrorLine error={q.error} />;
   const { job, run, purchases, paid } = q.data;
+  // Files the run's purchases delivered, oldest purchase first.
+  const media = [...purchases].reverse().flatMap((d) => d.media ?? []);
 
   return (
     <main className="mx-auto max-w-2xl">
@@ -41,6 +44,12 @@ export function ResultPage({ demo = false }: { demo?: boolean }) {
       <p className="mt-1 text-xs text-muted">
         {OUTCOME[run.outcome] ?? run.outcome} · {time(run.at)} · paid {money(paid)} USDC
       </p>
+
+      {media.length > 0 && (
+        <section className="mt-6">
+          <MediaGallery items={media} />
+        </section>
+      )}
 
       <article className="mt-6 rounded-xl border border-line p-5">
         {run.summary ? (

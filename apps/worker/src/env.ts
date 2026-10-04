@@ -48,6 +48,8 @@ const schema = z.object({
     .string()
     .regex(/^\d+(\.\d{1,6})?$/, "a USDC amount, like 5 or 2.50")
     .optional(),
+  /** Vercel Blob: where images, audio and video from delivered results are kept. Optional. */
+  BLOB_READ_WRITE_TOKEN: z.string().min(1).optional(),
   WORKER_TICK_MS: z.coerce.number().int().min(250).default(2000),
   /** How often to sweep leftover dust out of idle job wallets. */
   WORKER_SWEEP_INTERVAL_MS: z.coerce.number().int().min(1000).default(300_000),
