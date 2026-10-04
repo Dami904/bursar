@@ -5,6 +5,7 @@ import {
   decisions,
   issueKey,
   jobs,
+  operatorRuns,
   type Db,
 } from "@bursar/db";
 import { formatUsdc } from "@bursar/money";
@@ -120,13 +121,27 @@ export async function autopilotOnce(deps: AutopilotDeps): Promise<string | null>
   if (credential === undefined) throw new Error("credential insert returned nothing");
 
   const newRevenue = BigInt(claimed.revenue_received) - BigInt(claimed.seen);
+  const paidSince = claimed.last_run !== null && newRevenue > 0n;
   let brief = claimed.brief;
-  if (claimed.last_run !== null && newRevenue > 0n) {
+  if (paidSince) {
     brief += `\n\nNew revenue: a customer just paid ${formatUsdc(newRevenue)} USDC into this job.`;
   }
   const history = await recentHistory(db, claimed.id);
   if (history !== "") {
-    brief += `\n\nWhat earlier runs on this job already did. If a paid purchase here already delivered what the brief asks for, don't buy it again: finish by saying which earlier purchase (when, what, price) delivered it and that the owner can open it from the job's results. Only buy again if the brief asks for more:\n${history}`;
+    // Asking again with the same brief, and nothing new (no customer payment), is a repeat: don't
+    // buy again what an earlier run already delivered. A new brief or a new payment is a new
+    // request, even if it buys something an earlier run bought (the demo does this every cycle).
+    const [lastRun] = await db
+      .select({ brief: operatorRuns.brief })
+      .from(operatorRuns)
+      .where(eq(operatorRuns.jobId, claimed.id))
+      .orderBy(desc(operatorRuns.createdAt))
+      .limit(1);
+    const repeat =
+      lastRun !== undefined && ownersPart(lastRun.brief) === claimed.brief.trim() && !paidSince;
+    brief += repeat
+      ? `\n\nWhat earlier runs on this job already did. This brief hasn't changed since the last run, so if a paid purchase here already delivered what it asks for, don't buy it again: finish by saying which earlier purchase (when, what, price) delivered it and that the owner can open it from the job's results:\n${history}`
+      : `\n\nWhat earlier runs on this job already did, for context. This run is a new request, from a new brief or a new customer payment: buy what it asks for, even if an earlier run bought something similar:\n${history}`;
   }
 
   deps.running.add(claimed.id);
@@ -169,6 +184,12 @@ export async function autopilotOnce(deps: AutopilotDeps): Promise<string | null>
       deps.running.delete(claimed.id);
     });
   return claimed.id;
+}
+
+/** What the owner wrote in a stored run brief: the notes Bursar adds after it are cut off. */
+function ownersPart(stored: string): string {
+  const added = stored.search(/\n\n(?:What earlier runs on this job already did|New revenue:)/);
+  return (added === -1 ? stored : stored.slice(0, added)).trim();
 }
 
 /**

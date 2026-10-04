@@ -1,4 +1,13 @@
-import { agents, createDb, credentials, decisions, hashKey, jobs, type Db } from "@bursar/db";
+import {
+  agents,
+  createDb,
+  credentials,
+  decisions,
+  hashKey,
+  jobs,
+  operatorRuns,
+  type Db,
+} from "@bursar/db";
 import { parseUsdc } from "@bursar/money";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -176,6 +185,64 @@ describe("autopilot", () => {
     await autopilotOnce({ ...fake.deps, db });
     expect(fake.requests[0]!.brief).toContain("What earlier runs on this job already did");
     expect(fake.requests[0]!.brief).toContain("https://seller.example, 0.02 USDC");
+    fake.finish();
+    await settle();
+  });
+
+  /** A job with one earlier purchase and one earlier run of `ranBrief`, ready for another run. */
+  async function jobWithHistory(ranBrief: string) {
+    const job = await liveJob();
+    const [agent] = await db
+      .insert(agents)
+      .values({ jobId: job.id, name: "Operator", role: "operator" })
+      .returning();
+    await db.insert(decisions).values({
+      jobId: job.id,
+      agentId: agent!.id,
+      operationId: `op-repeat-${job.id.slice(0, 8)}`,
+      kind: "PURCHASE",
+      payee: "https://seller.example",
+      amount: 150_000n,
+      reasoning: "market report",
+      result: "ALLOWED",
+      checks: [],
+      remainingAtDecision: 850_000n,
+    });
+    await db.insert(operatorRuns).values({
+      jobId: job.id,
+      agentId: agent!.id,
+      model: "test",
+      brief: `${ranBrief}\n\nWhat earlier runs on this job already did. (an older note)`,
+      steps: 3,
+      inputTokens: 1,
+      outputTokens: 1,
+      costMicros: 1n,
+      outcome: "completed",
+      summary: "bought it",
+    });
+    return job;
+  }
+
+  it("tells a repeat of the same brief not to buy again what an earlier run delivered", async () => {
+    const job = await jobWithHistory("Buy one insight line for the newsletter.");
+    const fake = fakeRuns();
+    await autopilotOnce({ ...fake.deps, db });
+    const brief = fake.requests[0]!.brief;
+    expect(brief).toContain("hasn't changed since the last run");
+    expect(brief).toContain("don't buy it again");
+    expect(job.id).toBe(fake.requests[0]!.jobId);
+    fake.finish();
+    await settle();
+  });
+
+  it("treats a new brief as a new request, so a scene that buys the same thing again does", async () => {
+    await jobWithHistory("Some earlier brief that is not the current one.");
+    const fake = fakeRuns();
+    await autopilotOnce({ ...fake.deps, db });
+    const brief = fake.requests[0]!.brief;
+    expect(brief).toContain("new request");
+    expect(brief).toContain("even if an earlier run bought something similar");
+    expect(brief).not.toContain("don't buy it again");
     fake.finish();
     await settle();
   });
