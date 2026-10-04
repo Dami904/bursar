@@ -54,6 +54,8 @@ export async function startWorker(env: WorkerEnv): Promise<RunningWorker | null>
     transport,
     account: privateKeyToAccount(env.OPERATOR_PRIVATE_KEY as Hex),
   });
+  const MEDIA_EVERY_MS = 10_000;
+  let lastMediaLook = 0;
   const mediaStore =
     env.BLOB_READ_WRITE_TOKEN === undefined ? null : blobStore(env.BLOB_READ_WRITE_TOKEN);
   const wallets = new CircleWalletProvider({
@@ -192,14 +194,18 @@ export async function startWorker(env: WorkerEnv): Promise<RunningWorker | null>
       } catch (error) {
         log.error("executor tick failed", error);
       }
-      try {
-        await keepMediaOnce({
-          db,
-          store: mediaStore,
-          allowPrivateHosts: env.ALLOW_PRIVATE_PAYEES === "true",
-        });
-      } catch (error) {
-        log.error("media tick failed", error);
+      // Files can wait a few seconds: look every 10 s, not every tick (each look is a query).
+      if (mediaStore !== null && Date.now() - lastMediaLook >= MEDIA_EVERY_MS) {
+        lastMediaLook = Date.now();
+        try {
+          await keepMediaOnce({
+            db,
+            store: mediaStore,
+            allowPrivateHosts: env.ALLOW_PRIVATE_PAYEES === "true",
+          });
+        } catch (error) {
+          log.error("media tick failed", error);
+        }
       }
       try {
         await reconcileOnce({

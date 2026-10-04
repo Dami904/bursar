@@ -18,6 +18,9 @@ export interface OperatorOptions {
   readonly maxSteps?: number;
   /** Wall-clock limit for the whole run, so a slow model can't keep a run open indefinitely. */
   readonly maxWallMs?: number;
+  /** How long check_purchase waits for a payment that is still going through. Default 30 s. */
+  readonly checkWaitMs?: number;
+  readonly checkEveryMs?: number;
   /** 0 for the main operator, 1 for a helper it spawned. Helpers can't spawn helpers. */
   readonly depth?: number;
   readonly log?: (event: string, fields: Record<string, unknown>) => void;
@@ -37,6 +40,9 @@ export interface OperatorResult {
 
 const DEFAULT_MAX_STEPS = 12;
 const HELPER_MAX_STEPS = 6;
+const CHECK_WAIT_MS = 30_000;
+const CHECK_EVERY_MS = 3_000;
+const GOING_THROUGH = new Set(["RESERVED", "RELEASING", "FUNDED_WALLET", "SIGNING"]);
 const DEFAULT_MAX_WALL_MS = 5 * 60 * 1000;
 const HELPER_MAX_WALL_MS = 2 * 60 * 1000;
 
@@ -306,10 +312,21 @@ export async function runOperator(options: OperatorOptions): Promise<OperatorRes
           });
           return ok(presentPurchase(result));
         }
-        case "check_purchase":
-          return ok(
-            presentAuthorization(await bursar.authorization(str(call.args, "authorization_id"))),
-          );
+        case "check_purchase": {
+          // A slow seller (an image takes about a minute) would use up the run's steps if every
+          // check answered at once. Wait here, up to a limit, while the payment is going through
+          // (not while it waits for a person: that can take hours).
+          const id = str(call.args, "authorization_id");
+          const waitUntil = Date.now() + (options.checkWaitMs ?? CHECK_WAIT_MS);
+          let latest = await bursar.authorization(id);
+          while (GOING_THROUGH.has(String(latest.state)) && Date.now() < waitUntil) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, options.checkEveryMs ?? CHECK_EVERY_MS),
+            );
+            latest = await bursar.authorization(id);
+          }
+          return ok(presentAuthorization(latest));
+        }
         case "spawn_helper": {
           if (depth > 0) return fail("NOT_ALLOWED", "Helpers can't spawn helpers");
           const role = str(call.args, "role");

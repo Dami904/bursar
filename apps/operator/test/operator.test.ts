@@ -461,3 +461,46 @@ describe("invoices", () => {
     expect(result.purchases).toBe(1);
   });
 });
+
+describe("checking a payment that is still going through", () => {
+  const checkOnce = (states: string[], options: { checkWaitMs?: number } = {}) => {
+    const provider = new ScriptedProvider([
+      [
+        turn([call("check_purchase", { authorization_id: "auth-9" })]),
+        turn([call("finish", { summary: "done" })]),
+      ],
+    ]);
+    const asked: string[] = [];
+    const { bursar } = fakeBursar({
+      authorization: async () => {
+        const state = states[Math.min(asked.length, states.length - 1)]!;
+        asked.push(state);
+        return { id: "auth-9", state };
+      },
+    });
+    return {
+      asked,
+      run: runOperator({ provider, bursar, brief: "wait", checkEveryMs: 1, ...options }),
+    };
+  };
+
+  it("waits until the payment settles, in one step", async () => {
+    const { asked, run } = checkOnce(["SIGNING", "SIGNING", "SETTLED"]);
+    const result = await run;
+    expect(asked).toEqual(["SIGNING", "SIGNING", "SETTLED"]);
+    expect(result.steps).toBe(2); // the check and the finish, not one check per poll
+  });
+
+  it("gives up waiting at the limit and reports where it stands", async () => {
+    const { asked, run } = checkOnce(["SIGNING"], { checkWaitMs: 20 });
+    await run;
+    expect(asked.length).toBeGreaterThan(1);
+    expect(asked.every((s) => s === "SIGNING")).toBe(true);
+  });
+
+  it("doesn't wait for a payment that is waiting on a person", async () => {
+    const { asked, run } = checkOnce(["PENDING_APPROVAL"]);
+    await run;
+    expect(asked).toEqual(["PENDING_APPROVAL"]);
+  });
+});

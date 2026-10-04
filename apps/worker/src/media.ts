@@ -186,8 +186,9 @@ const tries = new Map<string, { at: number; count: number }>();
 export async function keepMediaOnce(deps: MediaDeps): Promise<number> {
   const { db, store } = deps;
   if (store === null) return 0;
+  // Only what's needed: results can be large, and this runs on every worker tick.
   const rows = await db
-    .select()
+    .select({ id: authorizations.id, deliverable: authorizations.deliverable })
     .from(authorizations)
     .where(
       and(
