@@ -26,6 +26,7 @@ export function Jobs() {
           <p className="mt-1 text-sm text-muted">Give your agents a budget they can't overspend.</p>
         </Card>
       )}
+      {jobs.data && jobs.data.jobs.length > 0 && <Totals jobs={jobs.data.jobs} />}
       <div className="grid gap-3 sm:grid-cols-2">
         {jobs.data?.jobs.map((job) => (
           <Link key={job.id} to={`/app/jobs/${job.id}`}>
@@ -64,4 +65,40 @@ function statusWord(job: Job) {
     PAUSED: "Paused",
     CLOSED: "Closed",
   }[job.status];
+}
+
+const units = (value: string) => Math.round(Number(value) * 1_000_000);
+const usdc = (n: number) => money((n / 1_000_000).toFixed(6).replace(/0+$/, "").replace(/\.$/, ""));
+
+/** The whole fleet at a glance: what's funded, paid and held across every job, and what waits on you. */
+function Totals({ jobs }: { jobs: Job[] }) {
+  const sum = (pick: (j: Job) => string) => jobs.reduce((n, j) => n + units(pick(j)), 0);
+  const waiting = jobs.reduce((n, j) => n + (j.needsYou ?? 0), 0);
+  const tiles: { label: string; value: string; unit?: string; tone?: string }[] = [
+    { label: "Funded", value: usdc(sum((j) => j.budget)), unit: "USDC" },
+    { label: "Paid", value: usdc(sum((j) => j.settled)), unit: "USDC", tone: "text-paid" },
+    {
+      label: "Held or stuck",
+      value: usdc(sum((j) => j.reserved) + sum((j) => j.unresolved)),
+      unit: "USDC",
+      tone: "text-held",
+    },
+    {
+      label: "Waiting for you",
+      value: String(waiting),
+      tone: waiting > 0 ? "text-needs" : "text-muted",
+    },
+  ];
+  return (
+    <dl className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      {tiles.map((t) => (
+        <div key={t.label} className="rounded-2xl border border-line bg-surface px-4 py-3">
+          <dt className="text-xs text-muted">{t.label}</dt>
+          <dd className={`mt-1 text-2xl font-medium tracking-tight tabular-nums ${t.tone ?? ""}`}>
+            {t.value} {t.unit && <span className="text-xs font-normal text-muted">{t.unit}</span>}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
 }

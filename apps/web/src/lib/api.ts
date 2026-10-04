@@ -139,6 +139,8 @@ export interface MediaItem {
 export interface Decision {
   id: string;
   at: string;
+  /** The job it belongs to (the owner-wide activity feed names it). */
+  job?: { id: string; title: string };
   agent: { id: string; name: string; role: string };
   kind: "PURCHASE" | "INVOICE";
   payee: string;

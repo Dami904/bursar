@@ -154,6 +154,25 @@ describe("console reads", () => {
     expect((evidence.body.decision as { checks: unknown[] }).checks).toHaveLength(12);
   });
 
+  it("lists the owner's decisions across every job, each naming its job, and only theirs", async () => {
+    const a = await seedJob({ approvalThreshold: "0.05" });
+    const other = await seedJob();
+    await requestSpend(db, a.agents[0]!.principal, spend("0.02", "op-cons-0301", "one"));
+    await requestSpend(db, a.agents[0]!.principal, spend("0.10", "op-cons-0302", "two"));
+    await requestSpend(db, other.agents[0]!.principal, spend("0.03", "op-cons-0303", "not mine"));
+
+    const feed = await call("GET", "/decisions?limit=50", a.ownerKey);
+    expect(feed.status).toBe(200);
+    const rows = feed.body.decisions as { amount: string; job: { id: string } }[];
+    expect(rows.map((r) => r.amount)).toEqual(["0.10", "0.02"]); // newest first, none of the other owner's
+    expect(rows.every((r) => r.job.id === a.job.id)).toBe(true);
+    expect(feed.body.decisions).toMatchObject([
+      { state: "PENDING_APPROVAL", job: { title: expect.any(String) } },
+      { state: "RESERVED" },
+    ]);
+    expect((await call("GET", "/decisions", null)).status).toBe(401);
+  });
+
   it("keeps each owner to their own jobs and decisions", async () => {
     const a = await seedJob();
     const b = await seedJob();

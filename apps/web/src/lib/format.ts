@@ -91,3 +91,49 @@ export function money(value: string) {
   const [whole, fraction = ""] = value.split(".");
   return `${whole}.${fraction.padEnd(2, "0")}`;
 }
+
+/**
+ * The twelve rules every request is checked against, in the order they run, each in plain words
+ * for when it passes and when it stops the request (the check names are the API's).
+ */
+export const ruleLines: Record<string, { pass: string; fail: string }> = {
+  JOB_NOT_ACTIVE: { pass: "The job is open", fail: "The job is paused" },
+  JOB_EXPIRED: { pass: "The job hasn't expired", fail: "The job has expired" },
+  AGENT_NOT_IN_JOB: { pass: "The agent works on this job", fail: "The agent isn't on this job" },
+  AGENT_REVOKED: { pass: "The agent's key is active", fail: "The agent's key was revoked" },
+  INVALID_AMOUNT: { pass: "The amount is valid", fail: "The amount isn't valid" },
+  PAYEE_NOT_ALLOWED: { pass: "The seller is allowed", fail: "The seller isn't allowed" },
+  PER_TX_CAP_EXCEEDED: { pass: "Within the per-payment cap", fail: "Over the per-payment cap" },
+  AGENT_LIMIT_EXCEEDED: {
+    pass: "Within the agent's own limit",
+    fail: "Over the agent's own limit",
+  },
+  CATEGORY_BUDGET_EXCEEDED: { pass: "Within the category limit", fail: "Over the category limit" },
+  JOB_BUDGET_EXCEEDED: { pass: "Within the job's budget", fail: "Over the job's budget" },
+  JOB_UNDERFUNDED: { pass: "The vault holds enough", fail: "The vault doesn't hold enough" },
+  RATE_LIMITED: { pass: "Not too many, too fast", fail: "Too many, too fast" },
+};
+
+/** The word stamped on a voucher, and the headline over it. */
+export function verdictOf(d: Pick<Decision, "result" | "state">): {
+  stamp: string;
+  headline: string;
+  tone: Tone;
+} {
+  if (d.result === "DENIED")
+    return { stamp: "BLOCKED", headline: "Why it was stopped", tone: "blocked" };
+  switch (d.state) {
+    case "SETTLED":
+      return { stamp: "PAID", headline: "Why it went through", tone: "paid" };
+    case "PENDING_APPROVAL":
+      return { stamp: "NEEDS YOU", headline: "Why it's waiting for you", tone: "needs" };
+    case "UNRESOLVED":
+      return { stamp: "STUCK", headline: "Why it's on hold", tone: "stuck" };
+    case "RELEASED":
+      return { stamp: "RETURNED", headline: "Why the money came back", tone: "muted" };
+    case "REJECTED":
+      return { stamp: "REJECTED", headline: "Why it was turned down", tone: "muted" };
+    default:
+      return { stamp: "HELD", headline: "Why it's on its way", tone: "held" };
+  }
+}

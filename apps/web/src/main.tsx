@@ -8,6 +8,7 @@ import { Shell } from "./components/Shell.js";
 import { Docs } from "./docs/Docs.js";
 import { SessionProvider, useSession } from "./lib/session.js";
 import { wagmiConfig } from "./lib/wagmi.js";
+import { Activity } from "./pages/Activity.js";
 import { Approvals } from "./pages/Approvals.js";
 import { Demo, DemoEvidence } from "./pages/Demo.js";
 import { DemoResult, ResultPage } from "./pages/Result.js";
@@ -74,6 +75,7 @@ createRoot(root).render(
                 <Route path="jobs/new" element={<NewJob />} />
                 <Route path="jobs/:id" element={<Job />} />
                 <Route path="jobs/:id/results/:runId" element={<ResultPage />} />
+                <Route path="activity" element={<Activity />} />
                 <Route path="approvals" element={<Approvals />} />
                 <Route path="decisions/:id" element={<EvidencePage />} />
                 <Route path="metrics" element={<MetricsPage />} />

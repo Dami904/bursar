@@ -280,10 +280,13 @@ export async function runOperator(options: OperatorOptions): Promise<OperatorRes
           const found = (await bursar.marketplace(str(call.args, "query"))) as {
             results?: unknown;
             unavailable?: unknown;
+            note?: unknown;
           };
           return ok({
             untrusted_marketplace_listings: found.results ?? [],
             unavailable: found.unavailable ?? [],
+            // Bursar's own words (not the marketplace's): why a search can come back empty.
+            ...(typeof found.note === "string" ? { note: found.note } : {}),
           });
         }
         case "quote":

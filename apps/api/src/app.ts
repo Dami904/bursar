@@ -58,6 +58,7 @@ import {
   decisionEvidence,
   jobAgents,
   jobDecisions,
+  ownerActivity,
   jobPayees,
   jobRuns,
   listJobs,
@@ -649,6 +650,13 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
     return c.json({ agents: await jobAgents(db, owner.ownerId, c.req.param("id")) });
   });
 
+  app.get("/decisions", async (c) => {
+    const owner = require(c, "OWNER");
+    const asked = Number(c.req.query("limit") ?? 100);
+    const limit = Number.isFinite(asked) ? Math.min(Math.max(Math.trunc(asked), 1), 200) : 100;
+    return c.json({ decisions: await ownerActivity(db, owner.ownerId, limit) });
+  });
+
   app.get("/decisions/:id", async (c) => {
     const owner = require(c, "OWNER");
     return c.json(await decisionEvidence(db, owner.ownerId, c.req.param("id")));
@@ -988,10 +996,13 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
     }
     const results: ReturnType<typeof listingView>[] = [];
     const unavailable: string[] = [];
+    let anyOnNetwork = false;
     for (const row of rows) {
       try {
+        const listings = await listingsOf(row.value);
+        anyOnNetwork ||= listings.some((l) => l.networks.includes(network));
         const found = searchListings(
-          await listingsOf(row.value),
+          listings,
           q,
           network,
           filtersOf(row.filters),
@@ -1003,7 +1014,12 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
         unavailable.push(row.value);
       }
     }
-    return c.json({ results, unavailable });
+    // Nothing found is different from nothing sold here: say which, so nobody blames the search.
+    const note =
+      results.length === 0 && unavailable.length === 0 && !anyOnNetwork
+        ? `The marketplace lists no services that take payment on this job's network (${network}). Services are listed for other networks only (Arc mainnet), so nothing can be bought here.`
+        : undefined;
+    return c.json({ results, unavailable, ...(note === undefined ? {} : { note }) });
   });
 
   /**

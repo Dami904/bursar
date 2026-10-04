@@ -37,7 +37,7 @@ export function Ticker() {
   );
 }
 
-function SectionTitle({
+export function SectionTitle({
   kicker,
   title,
   sub,

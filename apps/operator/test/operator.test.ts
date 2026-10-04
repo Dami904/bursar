@@ -277,6 +277,29 @@ describe("marketplace", () => {
     expect(result.outcome).toBe("completed");
   });
 
+  it("passes on Bursar's note when the marketplace sells nothing on the job's network", async () => {
+    const provider = new ScriptedProvider([
+      [
+        turn([call("search_marketplace", { query: "image" })]),
+        turn([call("finish", { summary: "Nothing to buy here." })]),
+      ],
+    ]);
+    const { bursar } = fakeBursar({
+      marketplace: async () => ({
+        results: [],
+        unavailable: [],
+        note: "The marketplace lists no services that take payment on this job's network.",
+      }),
+    });
+    await runOperator({ provider, bursar, brief: "Make an image" });
+    const seen = JSON.parse(provider.sessions[0]!.results[0]![0]!.content) as Record<
+      string,
+      unknown
+    >;
+    expect(seen.untrusted_marketplace_listings).toEqual([]);
+    expect(seen.note).toContain("no services that take payment on this job's network");
+  });
+
   it("returns a malformed body or method to the model as an error, without buying", async () => {
     const provider = new ScriptedProvider([
       [

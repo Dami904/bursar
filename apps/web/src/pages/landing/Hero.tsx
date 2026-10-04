@@ -57,6 +57,17 @@ export function Hero() {
               Read the quickstart
             </Link>
           </div>
+          <p className="animate-rise mt-8 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted [animation-delay:440ms]">
+            Built on
+            {["Arc", "Circle Gateway", "x402", "USDC"].map((name) => (
+              <span
+                key={name}
+                className="rounded-full border border-line bg-surface px-2.5 py-1 font-medium text-ink"
+              >
+                {name}
+              </span>
+            ))}
+          </p>
         </div>
         <ProductShot />
       </div>

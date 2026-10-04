@@ -128,18 +128,35 @@ export async function runResult(db: Db, ownerId: string, jobId: string, runId: s
 /** A job's decisions, newest first, each with its payment's state and the payee's label. */
 export async function jobDecisions(db: Db, ownerId: string, jobId: string, limit = 100) {
   const job = await getOwnedJob(db, ownerId, jobId);
+  return decisionRows(db, eq(decisions.jobId, job.id), limit);
+}
+
+/** Every decision across the owner's jobs, newest first, each naming its job: the daybook. */
+export async function ownerActivity(db: Db, ownerId: string, limit = 100) {
+  return decisionRows(db, eq(jobs.ownerId, ownerId), limit);
+}
+
+async function decisionRows(db: Db, where: ReturnType<typeof eq>, limit: number) {
   const rows = await db
-    .select({ decision: decisions, auth: authorizations, agent: agents, payee: payees })
+    .select({
+      decision: decisions,
+      auth: authorizations,
+      agent: agents,
+      payee: payees,
+      job: { id: jobs.id, title: jobs.title },
+    })
     .from(decisions)
+    .innerJoin(jobs, eq(jobs.id, decisions.jobId))
     .innerJoin(agents, eq(agents.id, decisions.agentId))
     .leftJoin(authorizations, eq(authorizations.decisionId, decisions.id))
     .leftJoin(payees, and(eq(payees.jobId, decisions.jobId), eq(payees.value, decisions.payee)))
-    .where(eq(decisions.jobId, job.id))
+    .where(where)
     .orderBy(desc(decisions.createdAt))
     .limit(limit);
-  return rows.map(({ decision: d, auth, agent, payee }) => ({
+  return rows.map(({ decision: d, auth, agent, payee, job }) => ({
     id: d.id,
     at: d.createdAt.toISOString(),
+    job,
     agent: { id: agent.id, name: agent.name, role: agent.role },
     kind: d.kind,
     payee: d.payee,

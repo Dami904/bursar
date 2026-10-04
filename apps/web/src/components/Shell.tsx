@@ -1,6 +1,9 @@
+import { usdcAbi } from "@bursar/payments/chain";
 import { useQuery } from "@tanstack/react-query";
 import { Bell, LogOut, Moon, Sun } from "lucide-react";
 import { NavLink, Outlet } from "react-router";
+import { formatUnits } from "viem";
+import { useReadContract } from "wagmi";
 import { api, type PendingApproval } from "../lib/api.js";
 import { config } from "../lib/config.js";
 import { shortAddress } from "../lib/format.js";
@@ -41,6 +44,11 @@ export function Shell() {
                 Jobs
               </NavLink>
             )}
+            {owner && (
+              <NavLink to="/app/activity" className={navClass}>
+                Activity
+              </NavLink>
+            )}
             <NavLink to="/app/approvals" className={navClass}>
               Approvals
               {waiting > 0 && (
@@ -57,13 +65,7 @@ export function Shell() {
           </nav>
         </div>
         <div className="flex items-center gap-2 text-sm text-muted">
-          <span
-            className="hidden items-center gap-1.5 sm:flex"
-            title={live ? "Live" : "Reconnecting"}
-          >
-            <span className={`size-1.5 rounded-full ${live ? "bg-paid" : "bg-muted"}`} />
-            {session && shortAddress(session.wallet)}
-          </span>
+          {session && <WalletPill wallet={session.wallet} live={live} />}
           {owner && (
             <NavLink
               to="/app/settings"
@@ -133,6 +135,34 @@ function NetworkLabel() {
       className="hidden rounded-full border border-line px-2 py-0.5 text-[11px] whitespace-nowrap text-muted sm:inline"
     >
       Testnet
+    </span>
+  );
+}
+
+/** Who's signed in, whether the live feed is up, and how much USDC that wallet holds here. */
+function WalletPill({ wallet, live }: { wallet: string; live: boolean }) {
+  const balance = useReadContract({
+    abi: usdcAbi,
+    address: config.usdc,
+    functionName: "balanceOf",
+    args: [wallet as `0x${string}`],
+    chainId: config.chain.id,
+    query: { refetchInterval: 30_000 },
+  });
+  const usdc =
+    typeof balance.data === "bigint" ? Number(formatUnits(balance.data, 6)).toFixed(2) : null;
+  return (
+    <span
+      className="hidden items-center gap-2 rounded-full border border-line px-3 py-1 sm:flex"
+      title={`${wallet}${live ? " · live" : " · reconnecting"}`}
+    >
+      <span className={`size-1.5 rounded-full ${live ? "bg-paid" : "bg-muted"}`} />
+      <span className="font-mono text-xs">{shortAddress(wallet)}</span>
+      {usdc !== null && (
+        <span className="border-l border-line pl-2 font-mono text-xs tabular-nums text-ink">
+          {usdc} <span className="text-muted">USDC</span>
+        </span>
+      )}
     </span>
   );
 }

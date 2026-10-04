@@ -1,6 +1,8 @@
-import type { ReactNode } from "react";
+import { Check, Copy, ExternalLink } from "lucide-react";
+import { useState, type ReactNode } from "react";
 import type { Job } from "../lib/api.js";
-import { money, toneBg, toneText, type Tone } from "../lib/format.js";
+import { txUrl } from "../lib/config.js";
+import { money, shortHash, toneBg, toneText, type Tone } from "../lib/format.js";
 
 /** The b with a coin for its bowl. The stem follows the text colour; the coin is always gold. */
 export function Logo({ size = 20 }: { size?: number }) {
@@ -90,8 +92,60 @@ export function Card({ children, className = "" }: { children: ReactNode; classN
   );
 }
 
+/** A grey bar that pulses where text will be, so a page keeps its shape while it loads. */
+export function Skeleton({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded-md bg-track ${className}`} aria-hidden="true" />;
+}
+
+/** What a page looks like before its data arrives: a title, a figure and a few rows. */
 export function Loading() {
-  return <div className="py-16 text-center text-sm text-muted">Loading…</div>;
+  return (
+    <div className="mx-auto max-w-xl space-y-4 py-8" role="status" aria-label="Loading">
+      <Skeleton className="h-4 w-24" />
+      <Skeleton className="h-8 w-3/4" />
+      <Skeleton className="h-40 w-full rounded-2xl" />
+      <Skeleton className="h-4 w-1/2" />
+      <Skeleton className="h-4 w-2/3" />
+    </div>
+  );
+}
+
+/** Copies `text` and says so for a moment. For hashes and ids nobody wants to retype. */
+export function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label={done ? "Copied" : label}
+      title={done ? "Copied" : label}
+      className="inline-flex size-5 items-center justify-center rounded text-muted hover:text-ink"
+      onClick={() => {
+        navigator.clipboard
+          .writeText(text)
+          .then(() => {
+            setDone(true);
+            setTimeout(() => setDone(false), 1500);
+          })
+          .catch(() => undefined);
+      }}
+    >
+      {done ? <Check size={12} /> : <Copy size={12} />}
+    </button>
+  );
+}
+
+const PERFORATION =
+  "radial-gradient(circle at 7px 0, transparent 4.5px, var(--surface) 5px) repeat-x";
+
+/** The torn edge of a voucher: a row of half-circle bites along the top or bottom. */
+export function Perforation({ bottom = false }: { bottom?: boolean }) {
+  return (
+    <div
+      aria-hidden="true"
+      className={`h-2 ${bottom ? "rotate-180" : ""}`}
+      style={{ background: PERFORATION, backgroundSize: "14px 8px" }}
+    />
+  );
 }
 
 export function ErrorLine({ error }: { error: unknown }) {
@@ -148,5 +202,22 @@ export function AgentMark({ id, name }: { id: string; name: string }) {
         />
       ))}
     </svg>
+  );
+}
+
+/** A transaction on Arc: its short hash opens the explorer, with a button to copy the whole hash. */
+export function TxLink({ hash }: { hash: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <a
+        href={txUrl(hash)}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex items-center gap-1 font-mono text-xs text-muted underline hover:text-ink"
+      >
+        {shortHash(hash)} <ExternalLink size={11} />
+      </a>
+      <CopyButton text={hash} label="Copy the transaction hash" />
+    </span>
   );
 }

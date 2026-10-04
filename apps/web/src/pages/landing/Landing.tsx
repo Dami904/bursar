@@ -2,6 +2,7 @@ import { Moon, Sun } from "lucide-react";
 import { Link } from "react-router";
 import { useSession } from "../../lib/session.js";
 import { useTheme } from "../../lib/theme.js";
+import { Controls, Faq, OneRule, PaymentLife, WhereItBreaks } from "./Explain.js";
 import { Hero } from "./Hero.js";
 import {
   CtaBand,
@@ -22,9 +23,14 @@ export function Landing() {
         <Hero />
         <Ticker />
         <OverspendDemo />
+        <OneRule />
+        <WhereItBreaks />
+        <Controls />
         <HowItWorks />
+        <PaymentLife />
         <InjectionDemo />
         <Stats />
+        <Faq />
         <CtaBand />
       </main>
       <Footer />

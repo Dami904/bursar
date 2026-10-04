@@ -218,6 +218,23 @@ describe("marketplace mode", () => {
     );
   });
 
+  it("says so when the marketplace sells nothing on the job's network, rather than just coming back empty", async () => {
+    const { agents } = await jobWithMarket();
+    listed = [{ ...listing("/v1/insight", 100_000n), networks: ["eip155:5042"] }];
+    const found = await call("/spend/marketplace?q=insight", agents[0]!.key);
+    expect(found.body.results).toEqual([]);
+    expect(String(found.body.note)).toContain(
+      "no services that take payment on this job's network",
+    );
+
+    // A real miss on a network it does sell on carries no such note.
+    clearMarketplaceCache();
+    listed = [listing("/v1/insight", 100_000n)];
+    const miss = await call("/spend/marketplace?q=zzzz-nothing", agents[0]!.key);
+    expect(miss.body.results).toEqual([]);
+    expect(miss.body.note).toBeUndefined();
+  });
+
   it("tells an agent with no marketplace on its job", async () => {
     const { agents } = await seedJob({ budget: "1.00" });
     const response = await call("/spend/marketplace?q=x", agents[0]!.key);

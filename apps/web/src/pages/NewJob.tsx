@@ -175,10 +175,13 @@ function PayeesStep({
           Sellers (a website) and vendors (a wallet). Nobody else.
         </p>
       </div>
-      <label className="flex gap-3 rounded-xl border border-line p-3 text-sm">
+      <label
+        className={`flex gap-3 rounded-xl border border-line p-3 text-sm ${config.mainnet ? "" : "opacity-60"}`}
+      >
         <input
           type="checkbox"
           className="mt-1"
+          disabled={!config.mainnet}
           checked={market !== undefined}
           onChange={(e) =>
             setPayees(
@@ -199,8 +202,9 @@ function PayeesStep({
         <span className="min-w-0 flex-1">
           <span className="block font-medium">Any service in {CIRCLE_MARKETPLACE.name}</span>
           <span className="block text-muted">
-            The agent can search it and buy what it lists on this network, never above the listed
-            price. Your budget, caps and approvals still apply.
+            {config.mainnet
+              ? "The agent can search it and buy what it lists on this network, never above the listed price. Your budget, caps and approvals still apply."
+              : "Circle's marketplace sells on Arc mainnet only, so on testnet it has nothing to buy. Name a seller below, or switch to mainnet to use the marketplace."}
           </span>
           {market !== undefined && (
             <span className="mt-2 flex items-center gap-2">
@@ -302,18 +306,53 @@ function FundStep({
   const [agentKey, setAgentKey] = useState<string | null>(null);
 
   const vendors = draft.payees.filter((p) => p.kind === "ADDRESS");
-  const steps = [
-    { id: "create", label: "Create the job" },
-    { id: "vault", label: "Open it in the vault" },
-    { id: "approve", label: "Allow the deposit" },
-    { id: "fund", label: `Deposit ${draft.budget} USDC` },
-    { id: "approver", label: "Let your wallet approve payments" },
+  // What each step does, in plain words, and whether it needs a confirmation in the wallet.
+  const steps: { id: string; label: string; why: string; signs: boolean }[] = [
+    {
+      id: "create",
+      label: "Create the job",
+      why: "Saved in Bursar. Nothing is signed.",
+      signs: false,
+    },
+    {
+      id: "vault",
+      label: "Open it in the vault",
+      why: "Registers the job's rules on Arc.",
+      signs: true,
+    },
+    {
+      id: "approve",
+      label: "Allow the deposit",
+      why: "Lets the vault take the deposit from your wallet. No money moves yet.",
+      signs: true,
+    },
+    {
+      id: "fund",
+      label: `Deposit ${draft.budget} USDC`,
+      why: "Moves it into the vault. It stays yours: agents can only spend within your rules.",
+      signs: true,
+    },
+    {
+      id: "approver",
+      label: "Let your wallet approve payments",
+      why: "So you can sign off on larger payments from this wallet.",
+      signs: true,
+    },
     ...vendors.map((v) => ({
       id: `vendor:${v.value}`,
       label: `Allow ${v.label || v.value.slice(0, 8)}`,
+      why: "Lets the vault pay this vendor address, and no other.",
+      signs: true,
     })),
-    { id: "live", label: "Waiting for Arc" },
+    {
+      id: "live",
+      label: "Waiting for Arc",
+      why: "Arc confirms it, usually in under a minute.",
+      signs: false,
+    },
   ];
+  const confirmations = steps.filter((s) => s.signs);
+  const confirmed = confirmations.filter((s) => states[s.id] === "done").length;
 
   async function run() {
     setRunning(true);
@@ -467,13 +506,31 @@ function FundStep({
           {draft.payees.length} {draft.payees.length === 1 ? "payee" : "payees"}
         </p>
       </Card>
-      <ol className="space-y-2">
-        {steps.map((s) => {
+      <div>
+        <div className="flex items-baseline justify-between text-sm">
+          <span className="font-medium">{confirmations.length} confirmations in your wallet</span>
+          <span className="text-muted">{confirmed} done</span>
+        </div>
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-track" aria-hidden="true">
+          <div
+            className="h-full bg-paid transition-all"
+            style={{ width: `${(confirmed / confirmations.length) * 100}%` }}
+          />
+        </div>
+      </div>
+      <ol className="relative">
+        {steps.map((s, i) => {
           const st = states[s.id] ?? "todo";
           return (
-            <li key={s.id} className="flex items-center gap-3 text-sm">
+            <li key={s.id} className="relative flex gap-3 pb-5 last:pb-0">
+              {i < steps.length - 1 && (
+                <span
+                  className={`absolute left-[9px] top-5 h-full w-px ${st === "done" ? "bg-paid" : "bg-line"}`}
+                  aria-hidden="true"
+                />
+              )}
               <span
-                className={`flex size-5 items-center justify-center rounded-full border ${
+                className={`relative z-10 mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border bg-bg ${
                   st === "done"
                     ? "border-paid bg-paid text-on-accent"
                     : st === "failed"
@@ -483,7 +540,17 @@ function FundStep({
               >
                 {st === "done" && <Check size={12} />}
               </span>
-              <span className={st === "todo" ? "text-muted" : ""}>{s.label}</span>
+              <span className="min-w-0 text-sm">
+                <span className={`flex items-center gap-2 ${st === "todo" ? "text-muted" : ""}`}>
+                  {s.label}
+                  {s.signs && (
+                    <span className="rounded-full border border-line px-1.5 text-[10px] text-muted">
+                      wallet
+                    </span>
+                  )}
+                </span>
+                <span className="block text-xs text-muted">{s.why}</span>
+              </span>
             </li>
           );
         })}
