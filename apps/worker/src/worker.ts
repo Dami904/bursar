@@ -1,7 +1,15 @@
-import { backfillDecisions, computeMetrics, createDb, jobs, metricsDaily } from "@bursar/db";
+import {
+  authorizations,
+  backfillDecisions,
+  computeMetrics,
+  createDb,
+  jobs,
+  metricsDaily,
+} from "@bursar/db";
 import { parseUsdc } from "@bursar/money";
 import { bursarClient, hasModelKey, providerFromEnv, runOperator } from "@bursar/operator";
 import { CircleWalletProvider } from "@bursar/payments";
+import { inArray } from "drizzle-orm";
 import { createPublicClient, createWalletClient, http, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { arc, arcTestnet } from "viem/chains";
@@ -21,6 +29,9 @@ import { withdrawOnce } from "./withdrawals.js";
 /** Any fixed number: every Bursar worker competes for this one advisory lock. */
 const WORKER_LOCK = 4_242_001;
 const DEMO_EVERY_MS = 30_000;
+
+/** Payments the worker is moving along: it ticks quickly while any exist. */
+const IN_FLIGHT = ["RESERVED", "RELEASING", "FUNDED_WALLET", "SIGNING"] as const;
 
 export interface RunningWorker {
   stop(): Promise<void>;
@@ -271,8 +282,25 @@ export async function startWorker(env: WorkerEnv): Promise<RunningWorker | null>
       } catch (error) {
         log.error("metrics snapshot failed", error);
       }
+      // Quick while a payment is going through (or the operator is working); slow when idle.
+      let busy = autopilot !== null && autopilot.running.size > 0;
+      if (!busy) {
+        try {
+          const [inFlight] = await db
+            .select({ id: authorizations.id })
+            .from(authorizations)
+            .where(inArray(authorizations.state, IN_FLIGHT))
+            .limit(1);
+          busy = inFlight !== undefined;
+        } catch {
+          busy = true; // can't tell: stay quick
+        }
+      }
+      const pause = busy
+        ? env.WORKER_TICK_MS
+        : Math.max(env.WORKER_TICK_MS, env.WORKER_IDLE_TICK_MS);
       await new Promise((resolve) =>
-        setTimeout(resolve, Math.max(0, env.WORKER_TICK_MS - (Date.now() - started))),
+        setTimeout(resolve, Math.max(0, pause - (Date.now() - started))),
       );
     }
   })();

@@ -38,6 +38,12 @@ export interface ReconcilerDeps {
   readonly expiryGraceMs?: number;
   /** How often to look for leftover dust in job wallets. */
   readonly sweepIntervalMs?: number;
+  /**
+   * How often payments waiting to be resolved are looked at. Each look reads their full rows and
+   * asks the chain or Circle about each, and what they wait for (a signature expiring) is
+   * measured in minutes, so it doesn't need to run on every tick.
+   */
+  readonly unresolvedEveryMs?: number;
 }
 
 const DEFAULT_APPROVAL_TTL_MS = 2 * 60 * 60 * 1000;
@@ -48,6 +54,7 @@ const DEFAULT_EXPIRY_GRACE_MS = 15_000;
 const GATEWAY_UNKNOWN_MS = 10 * 60_000;
 const STUCK_RELEASE_MS = 2 * 60 * 1000;
 const DEFAULT_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+const DEFAULT_UNRESOLVED_EVERY_MS = 30_000;
 /** Leftovers below 0.01 USDC aren't worth a transaction: the fee would eat most of them. */
 const SWEEP_MIN = 10_000n;
 /**
@@ -62,6 +69,7 @@ const IN_FLIGHT: ("RELEASING" | "FUNDED_WALLET" | "SIGNING" | "UNRESOLVED")[] = 
   "UNRESOLVED",
 ];
 let lastSweepAt = 0;
+let lastUnresolvedAt = 0;
 
 type AuthorizationRow = typeof authorizations.$inferSelect;
 
@@ -79,6 +87,10 @@ export async function reconcileOnce(deps: ReconcilerDeps): Promise<void> {
     lastSweepAt = Date.now();
     await sweepWallets(deps);
   }
+  if (Date.now() - lastUnresolvedAt < (deps.unresolvedEveryMs ?? DEFAULT_UNRESOLVED_EVERY_MS)) {
+    return;
+  }
+  lastUnresolvedAt = Date.now();
   const open = await deps.db
     .select()
     .from(authorizations)

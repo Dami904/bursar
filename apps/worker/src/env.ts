@@ -51,6 +51,12 @@ const schema = z.object({
   /** Vercel Blob: where images, audio and video from delivered results are kept. Optional. */
   BLOB_READ_WRITE_TOKEN: z.string().min(1).optional(),
   WORKER_TICK_MS: z.coerce.number().int().min(250).default(2000),
+  /**
+   * The pause between ticks when no payment is in flight. Every tick is a round of database
+   * queries, and a hosted database bills (or caps) the data they return, so an idle worker slows
+   * down; a payment going through makes it tick at WORKER_TICK_MS again.
+   */
+  WORKER_IDLE_TICK_MS: z.coerce.number().int().min(250).default(10_000),
   /** How often to sweep leftover dust out of idle job wallets. */
   WORKER_SWEEP_INTERVAL_MS: z.coerce.number().int().min(1000).default(300_000),
 });

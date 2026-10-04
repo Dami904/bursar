@@ -101,7 +101,13 @@ const PRICE = 100_000n; // 0.10 USDC
 const index = () =>
   indexOnce({ db, client: chain.client, vault: chain.vault, deployBlock: chain.deployBlock });
 const reconcile = () =>
-  reconcileOnce({ ...deps, expiryGraceMs: 0, approvalTtlMs: 60_000, sweepIntervalMs: 0 });
+  reconcileOnce({
+    ...deps,
+    expiryGraceMs: 0,
+    approvalTtlMs: 60_000,
+    sweepIntervalMs: 0,
+    unresolvedEveryMs: 0,
+  });
 
 async function stateOf(id: string) {
   const [row] = await db.select().from(authorizations).where(eq(authorizations.id, id));
