@@ -4,6 +4,7 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { createSiweMessage } from "viem/siwe";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
+import { ownersBrief } from "../src/services/console.js";
 import { requestSpend } from "../src/services/spend.js";
 import { db, seedJob, spend } from "./support.js";
 
@@ -342,5 +343,25 @@ describe("a result page", () => {
     const pub = await demo.request(`/demo/runs/${runs[1]!.id}`);
     expect(pub.status).toBe(200);
     expect(await pub.json()).toMatchObject({ run: { summary: "**First** answer" } });
+  });
+});
+
+describe("a run's brief", () => {
+  it("shows what the owner wrote, not the notes Bursar added for the operator", () => {
+    const written = "Generate an image of a red door.";
+    const stored = `${written}
+
+New revenue: a customer just paid 1 USDC into this job.
+
+What earlier runs on this job already did (don't repeat a purchase unless the brief asks for more):
+- a purchase`;
+    expect(ownersBrief(stored)).toBe(written);
+    expect(
+      ownersBrief(`${written}
+
+What earlier runs on this job already did (x):
+- y`),
+    ).toBe(written);
+    expect(ownersBrief(written)).toBe(written);
   });
 });

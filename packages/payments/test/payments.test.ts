@@ -204,6 +204,9 @@ beforeAll(async () => {
       case "/refuse":
         res.writeHead(402, { "PAYMENT-REQUIRED": encodePaymentRequiredHeader(paymentRequired()) });
         return res.end('{"error":"invalid signature"}');
+      case "/bad-request":
+        res.writeHead(400, { "content-type": "application/json" });
+        return res.end('{"error":"model is required\nsize is optional"}');
       case "/crash":
         res.writeHead(502);
         return res.end("bad gateway");
@@ -506,5 +509,12 @@ describe("sendPayment: three outcomes, never two", () => {
 
   it("UNKNOWN when nothing answers", async () => {
     expect((await sendPayment("http://127.0.0.1:1/nothing", "e30=")).kind).toBe("UNKNOWN");
+  });
+
+  it("a failed quote carries what the seller said, so a bad request can be corrected", async () => {
+    const error = await quote(`${base}/bad-request`, options).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(QuoteError);
+    expect((error as Error).message).toContain("got HTTP 400");
+    expect((error as Error).message).toContain("model is required size is optional");
   });
 });

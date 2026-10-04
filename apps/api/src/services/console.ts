@@ -68,12 +68,21 @@ function runView(r: typeof operatorRuns.$inferSelect) {
     at: r.createdAt.toISOString(),
     outcome: r.outcome,
     summary: r.summary,
-    brief: r.brief,
+    brief: ownersBrief(r.brief),
     steps: r.steps,
     model: r.model,
     /** The AI model's cost in USD (not USDC paid on-chain). */
     aiCost: (Number(r.costMicros) / 1_000_000).toFixed(4),
   };
+}
+
+/**
+ * What the owner wrote. A run's brief also carries what Bursar added for the operator (earlier
+ * runs, new revenue); those notes aren't part of the owner's brief.
+ */
+export function ownersBrief(stored: string): string {
+  const added = stored.search(/\n\n(?:What earlier runs on this job already did|New revenue:)/);
+  return (added === -1 ? stored : stored.slice(0, added)).trim();
 }
 
 /**
