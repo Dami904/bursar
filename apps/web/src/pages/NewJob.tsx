@@ -162,7 +162,7 @@ function PayeesStep({
 }) {
   const [value, setValue] = useState("");
   const [label, setLabel] = useState("");
-  const [maxPrice, setMaxPrice] = useState("0.05");
+  const [maxPrice, setMaxPrice] = useState("0.25");
   const kind = /^0x[0-9a-fA-F]{40}$/.test(value.trim()) ? "ADDRESS" : "X402_ORIGIN";
   const market = payees.find((p) => p.kind === "MARKETPLACE");
   const others = payees.filter((p) => p.kind !== "MARKETPLACE");
@@ -219,7 +219,9 @@ function PayeesStep({
                 }}
                 aria-label="Most per call, USDC"
               />
-              <span className="text-muted">USDC per call</span>
+              <span className="text-muted">
+                USDC per call. Image generation sellers charge about 0.10 to 0.15.
+              </span>
             </span>
           )}
         </span>
