@@ -1,6 +1,6 @@
 import { Ban, ChevronDown, Clock, Gauge, ListChecks, Timer, UserCheck, Users } from "lucide-react";
 import { Link } from "react-router";
-import { Perforation } from "../../components/ui.js";
+import { DemoLink, Perforation } from "../../components/ui.js";
 import { useInView } from "../../lib/motion.js";
 import { SectionTitle } from "./Sections.js";
 
@@ -406,11 +406,7 @@ export function Faq() {
             <Link to="/docs/introduction" className="text-ink underline">
               Read the docs
             </Link>{" "}
-            or{" "}
-            <Link to="/demo" className="text-ink underline">
-              watch a live job
-            </Link>
-            .
+            or <DemoLink className="text-ink underline">watch a live job</DemoLink>.
           </p>
         </div>
         <div className="space-y-12">

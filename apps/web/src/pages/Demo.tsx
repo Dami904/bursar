@@ -74,6 +74,14 @@ export function DemoUnavailable({ error, onRetry }: { error: unknown; onRetry: (
             Try again
           </Button>
         )}
+        {config.mainnet && config.otherNetworkUrl !== undefined && (
+          <a
+            href={`${config.otherNetworkUrl}/demo`}
+            className="inline-flex items-center rounded-full bg-accent px-4 py-2 text-sm font-medium text-on-accent"
+          >
+            Open the testnet demo
+          </a>
+        )}
         <Link
           to="/docs/introduction"
           className="inline-flex items-center rounded-full border border-line px-4 py-2 text-sm font-medium hover:bg-bg"

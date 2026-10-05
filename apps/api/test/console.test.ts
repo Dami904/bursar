@@ -1,4 +1,4 @@
-import { authorizations, credentials, jobs } from "@bursar/db";
+import { agents as agentsTable, authorizations, credentials, jobs, operatorRuns } from "@bursar/db";
 import { eq } from "drizzle-orm";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { createSiweMessage } from "viem/siwe";
@@ -313,6 +313,50 @@ describe("results", () => {
     const other = await seedJob();
     expect((await call("GET", `/jobs/${job.id}/runs`, other.ownerKey)).status).toBe(404);
     expect((await call("GET", `/jobs/${job.id}/runs`, agents[0]!.key)).status).toBe(403);
+  });
+});
+
+describe("a helper's run", () => {
+  it("isn't listed on its own, and doesn't cut off the purchases its operator made before it", async () => {
+    const { agents, job, ownerKey } = await seedJob();
+    const agent = agents[0]!;
+    const run = (agentId: string, summary: string, brief: string) =>
+      db.insert(operatorRuns).values({
+        jobId: job.id,
+        agentId,
+        model: "test",
+        brief,
+        steps: 3,
+        inputTokens: 1,
+        outputTokens: 1,
+        costMicros: 1n,
+        outcome: "completed",
+        summary,
+      });
+    const mine = await requestSpend(db, agent.principal, spend("0.10", "op-helper-0001"));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const [helper] = await db
+      .insert(agentsTable)
+      .values({
+        jobId: job.id,
+        name: "helper: buyer",
+        role: "operator",
+        parentAgentId: agent.agent.id,
+      })
+      .returning();
+    await run(helper!.id, "helper done", "Buy the thing");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await run(agent.agent.id, "operator done", "Delegate it");
+
+    const listed = (await call("GET", `/jobs/${job.id}/runs`, ownerKey)).body.runs as {
+      id: string;
+      summary: string;
+    }[];
+    expect(listed.map((r) => r.summary)).toEqual(["operator done"]);
+    const result = await call("GET", `/jobs/${job.id}/runs/${listed[0]!.id}`, ownerKey);
+    expect((result.body.purchases as { id: string }[]).map((d) => d.id)).toEqual([
+      mine.decision.id,
+    ]);
   });
 });
 

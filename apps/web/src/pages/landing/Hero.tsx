@@ -1,6 +1,7 @@
 import { ArrowRight } from "lucide-react";
 import { Link } from "react-router";
-import { config } from "../../lib/config.js";
+import { DemoLink } from "../../components/ui.js";
+import { config, demoLink } from "../../lib/config.js";
 import { useLoop } from "../../lib/motion.js";
 import { Flow } from "./Flow.js";
 import { WaxSeal } from "./WaxSeal.js";
@@ -44,12 +45,9 @@ export function Hero() {
             you, all of it sealed on-chain.
           </p>
           <div className="animate-rise mt-8 flex flex-wrap gap-3 [animation-delay:320ms]">
-            <Link
-              to="/demo"
-              className="group inline-flex items-center gap-2 rounded-full bg-accent px-6 py-3 font-medium text-on-accent transition hover:gap-3"
-            >
-              Try the live demo <ArrowRight size={16} />
-            </Link>
+            <DemoLink className="group inline-flex items-center gap-2 rounded-full bg-accent px-6 py-3 font-medium text-on-accent transition hover:gap-3">
+              Try {demoLink.label} <ArrowRight size={16} />
+            </DemoLink>
             <Link
               to="/docs/quickstart"
               className="inline-flex items-center rounded-full border border-line bg-surface px-6 py-3 font-medium hover:border-muted"

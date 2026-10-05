@@ -1,7 +1,8 @@
 import { Check, Copy, ExternalLink } from "lucide-react";
 import { useState, type ReactNode } from "react";
+import { Link } from "react-router";
 import type { Job } from "../lib/api.js";
-import { txUrl } from "../lib/config.js";
+import { demoLink, txUrl } from "../lib/config.js";
 import { money, shortHash, toneBg, toneText, type Tone } from "../lib/format.js";
 
 /** The b with a coin for its bowl. The stem follows the text colour; the coin is always gold. */
@@ -219,5 +220,18 @@ export function TxLink({ hash }: { hash: string }) {
       </a>
       <CopyButton text={hash} label="Copy the transaction hash" />
     </span>
+  );
+}
+
+/** A link to the live demo: the site's own, or (on mainnet, which has none yet) the testnet one. */
+export function DemoLink({ className, children }: { className?: string; children: ReactNode }) {
+  return demoLink.external ? (
+    <a href={demoLink.href} className={className}>
+      {children}
+    </a>
+  ) : (
+    <Link to={demoLink.href} className={className}>
+      {children}
+    </Link>
   );
 }

@@ -3,7 +3,8 @@ import { ArrowRight, ArrowUpRight } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { api } from "../../lib/api.js";
-import { config } from "../../lib/config.js";
+import { DemoLink } from "../../components/ui.js";
+import { config, demoLink } from "../../lib/config.js";
 import { useCountUp, useInView } from "../../lib/motion.js";
 
 /** A tape of decisions, like a stock ticker. */
@@ -350,12 +351,9 @@ export function CtaBand() {
           An AI operator, a real budget, real payments on Arc. Every transaction opens on the chain.
         </p>
         <div className="relative mt-10 flex flex-wrap justify-center gap-3">
-          <Link
-            to="/demo"
-            className="inline-flex items-center gap-2 rounded-full bg-[#F2F2F2] px-6 py-3 font-medium text-[#111111] transition hover:gap-3"
-          >
-            Try the live demo <ArrowRight size={16} />
-          </Link>
+          <DemoLink className="inline-flex items-center gap-2 rounded-full bg-[#F2F2F2] px-6 py-3 font-medium text-[#111111] transition hover:gap-3">
+            Try {demoLink.label} <ArrowRight size={16} />
+          </DemoLink>
           <Link
             to="/login"
             className="inline-flex items-center rounded-full border border-[#2A2A2A] px-6 py-3 font-medium hover:border-[#9A9A9A]"

@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 /** config.ts reads the build's VITE_* values once, so each case loads a fresh copy. */
-async function load(env: Record<string, string>) {
+async function loadModule(env: Record<string, string>) {
   vi.resetModules();
   for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
-  return (await import("./config.js")).config;
+  return import("./config.js");
+}
+async function load(env: Record<string, string>) {
+  return (await loadModule(env)).config;
 }
 
 afterEach(() => {
@@ -35,5 +38,22 @@ describe("which Arc network the console is built for", { timeout: 30_000 }, () =
 
   it("refuses a mainnet build without a vault address, rather than using testnet's", async () => {
     await expect(load({ VITE_ARC_CHAIN_ID: "5042" })).rejects.toThrow(/VITE_JOB_VAULT_ADDRESS/);
+  });
+});
+
+describe("where the live demo links go", { timeout: 30_000 }, () => {
+  it("stay on the site on testnet, which has its own public demo", async () => {
+    const { demoLink } = await loadModule({});
+    expect(demoLink).toMatchObject({ href: "/demo", external: false });
+  });
+
+  it("open the testnet demo from mainnet, and say it's on testnet", async () => {
+    const { demoLink } = await loadModule({
+      VITE_ARC_CHAIN_ID: "5042",
+      VITE_JOB_VAULT_ADDRESS: "0x1111111111111111111111111111111111111111",
+      VITE_OTHER_NETWORK_URL: "https://bursarhq.vercel.app",
+    });
+    expect(demoLink).toMatchObject({ href: "https://bursarhq.vercel.app/demo", external: true });
+    expect(demoLink.label).toContain("testnet");
   });
 });

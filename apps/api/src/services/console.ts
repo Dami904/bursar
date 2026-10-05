@@ -12,7 +12,7 @@ import {
   payees,
   type Db,
 } from "@bursar/db";
-import { and, asc, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { agentView, authorizationView, jobView } from "../http/views.js";
 import { notFound } from "../http/errors.js";
 import { getOwnedJob } from "./jobs.js";
@@ -53,13 +53,15 @@ export async function listJobs(db: Db, ownerId: string) {
  */
 export async function jobRuns(db: Db, ownerId: string, jobId: string, limit = 20) {
   const job = await getOwnedJob(db, ownerId, jobId);
+  // A helper's own run is part of the run that spawned it, so only the operator's runs are listed.
   const rows = await db
-    .select()
+    .select({ run: operatorRuns })
     .from(operatorRuns)
-    .where(eq(operatorRuns.jobId, job.id))
+    .innerJoin(agents, eq(agents.id, operatorRuns.agentId))
+    .where(and(eq(operatorRuns.jobId, job.id), isNull(agents.parentAgentId)))
     .orderBy(desc(operatorRuns.createdAt))
     .limit(limit);
-  return rows.map(runView);
+  return rows.map((r) => runView(r.run));
 }
 
 function runView(r: typeof operatorRuns.$inferSelect) {
@@ -96,10 +98,18 @@ export async function runResult(db: Db, ownerId: string, jobId: string, runId: s
     .from(operatorRuns)
     .where(and(eq(operatorRuns.jobId, job.id), eq(operatorRuns.id, runId)));
   if (run === undefined) throw notFound("Result");
+  // The run before this one, not counting helpers' runs (they finish inside this run).
   const [previous] = await db
     .select({ at: operatorRuns.createdAt })
     .from(operatorRuns)
-    .where(and(eq(operatorRuns.jobId, job.id), lt(operatorRuns.createdAt, run.createdAt)))
+    .innerJoin(agents, eq(agents.id, operatorRuns.agentId))
+    .where(
+      and(
+        eq(operatorRuns.jobId, job.id),
+        isNull(agents.parentAgentId),
+        lt(operatorRuns.createdAt, run.createdAt),
+      ),
+    )
     .orderBy(desc(operatorRuns.createdAt))
     .limit(1);
   const helpers = await db

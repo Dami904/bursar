@@ -1,5 +1,6 @@
 import { Moon, Sun } from "lucide-react";
 import { Link } from "react-router";
+import { DemoLink } from "../../components/ui.js";
 import { useSession } from "../../lib/session.js";
 import { useTheme } from "../../lib/theme.js";
 import { Controls, Faq, OneRule, PaymentLife, WhereItBreaks } from "./Explain.js";
@@ -53,12 +54,9 @@ export function SiteHeader() {
           Bursar
         </Link>
         <nav className="flex items-center gap-1 text-sm">
-          <Link
-            to="/demo"
-            className="hidden rounded-full px-3 py-1.5 text-muted hover:text-ink sm:inline"
-          >
+          <DemoLink className="hidden rounded-full px-3 py-1.5 text-muted hover:text-ink sm:inline">
             Demo
-          </Link>
+          </DemoLink>
           <Link
             to="/docs/introduction"
             className="hidden rounded-full px-3 py-1.5 text-muted hover:text-ink sm:inline"

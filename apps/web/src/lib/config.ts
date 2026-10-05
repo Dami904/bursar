@@ -34,3 +34,17 @@ export const config = {
 
 export const txUrl = (hash: string) => `${config.explorer}/tx/${hash}`;
 export const addressUrl = (address: string) => `${config.explorer}/address/${address}`;
+
+/**
+ * Where the "live demo" links go. The testnet site has its own public demo job. Until the mainnet
+ * console has one too (PUBLIC_JOB_ID), its demo links open the testnet demo, which says plainly
+ * that it runs on testnet.
+ */
+export const demoLink: { href: string; external: boolean; label: string } =
+  config.mainnet && config.otherNetworkUrl !== undefined
+    ? {
+        href: `${config.otherNetworkUrl}/demo`,
+        external: true,
+        label: "the live demo (on testnet)",
+      }
+    : { href: "/demo", external: false, label: "the live demo" };
