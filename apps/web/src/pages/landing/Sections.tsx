@@ -372,7 +372,7 @@ export function Footer() {
     {
       title: "Product",
       links: [
-        ["Live demo", "/demo"],
+        ["Live demo", demoLink.href],
         ["Console", "/login"],
         ["Quickstart", "/docs/quickstart"],
       ],
@@ -450,7 +450,11 @@ export function Footer() {
       </div>
       <div className="relative mx-auto flex max-w-6xl flex-wrap justify-between gap-2 border-t border-line px-5 py-5 text-xs text-muted">
         <span>© 2026 Bursar · MIT License</span>
-        <span>Testnet only. Not financial advice.</span>
+        <span>
+          {config.mainnet
+            ? "Real USDC on Arc mainnet, capped per job. Not financial advice."
+            : "Testnet only. Not financial advice."}
+        </span>
       </div>
     </footer>
   );
