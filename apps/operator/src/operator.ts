@@ -73,7 +73,7 @@ Set max_price from the listing's price, up to the job's per-payment cap (get_bud
 
 If a purchase is denied, the reason tells you why (budget, per-payment cap, seller not allowed, and so on). Adapt or stop; don't repeat the same request. A payment above the owner's approval threshold waits for a human: it isn't a failure, and you can check on it later.
 
-When you're done, or can't go further, call finish with a summary for the owner: what you bought, why, what it cost, and anything that needs their attention.`;
+When you're done, or can't go further, call finish with a summary for the owner: what you bought, why, what it cost, and anything that needs their attention. The owner sees purchased images and files on the result page, so don't paste links to them. Only mention a limit if a tool result or the job's rules state one: never quote an example number as a limit.`;
 
 function spec(
   name: string,
@@ -422,6 +422,17 @@ export async function runOperator(options: OperatorOptions): Promise<OperatorRes
         outcome = "completed";
         summary = typeof finishCall.args.summary === "string" ? finishCall.args.summary : "";
         break;
+      }
+      // Two steps from the limit: say so, so a run that has paid still ends with its own summary
+      // instead of "stopped without finishing".
+      if (steps === maxSteps - 2 && results.length > 0) {
+        const last = results[results.length - 1]!;
+        results[results.length - 1] = {
+          ...last,
+          content: `${last.content}
+
+[Bursar: you have 2 steps left. Call finish now with what you bought, what it cost and where to see it.]`,
+        };
       }
       session.addToolResults(results);
     }

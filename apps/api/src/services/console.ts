@@ -6,6 +6,7 @@ import {
   auditAnchors,
   auditChain,
   authorizations,
+  chainEvents,
   decisions,
   jobs,
   operatorRuns,
@@ -331,4 +332,27 @@ export async function ownerFingerprint(db: Db, ownerId: string): Promise<string>
       (select coalesce(max(an.anchor_seq), 0) from audit_anchors an
         where an.status = 'CONFIRMED') as anchors`)) as unknown as Record<string, unknown>[];
   return JSON.stringify(row ?? {});
+}
+
+/**
+ * The on-chain transaction that closed a job and returned its money, read from the vault events the
+ * indexer recorded. Null while the job is open, or if the event hasn't been indexed yet.
+ */
+export async function closeTxOf(
+  db: Db,
+  job: Pick<typeof jobs.$inferSelect, "vaultJobId" | "status">,
+): Promise<string | null> {
+  if (job.status !== "CLOSED" || job.vaultJobId === null) return null;
+  const [row] = await db
+    .select({ txHash: chainEvents.txHash })
+    .from(chainEvents)
+    .where(
+      and(
+        eq(chainEvents.vaultJobId, job.vaultJobId),
+        inArray(chainEvents.eventName, ["Withdrawn", "StatusChanged"]),
+      ),
+    )
+    .orderBy(desc(chainEvents.blockNumber), desc(chainEvents.logIndex))
+    .limit(1);
+  return row?.txHash ?? null;
 }

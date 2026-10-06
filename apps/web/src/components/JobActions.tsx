@@ -10,7 +10,7 @@ import { api, type Job } from "../lib/api.js";
 import { config } from "../lib/config.js";
 import { money } from "../lib/format.js";
 import { wagmiConfig } from "../lib/wagmi.js";
-import { Button, Card, ErrorLine } from "./ui.js";
+import { Button, Card, ErrorLine, TxLink } from "./ui.js";
 
 type Action = "pause" | "unpause" | "closeJob";
 
@@ -41,6 +41,8 @@ function useVaultJob(job: Job) {
     const receipt = await waitForTransactionReceipt(wagmiConfig, { hash });
     if (receipt.status !== "success") throw new Error("The transaction failed on Arc");
     await onChain.refetch();
+    // Closing changes everything the page shows (spent, left, status): refresh it now, not later.
+    void queryClient.invalidateQueries();
     // The indexer picks the change up within seconds; refresh once it has.
     setTimeout(() => void queryClient.invalidateQueries(), 3000);
   };
@@ -135,6 +137,11 @@ export function JobStatusCard({ job }: { job: Job }) {
             ? `${money(formatUsdc(vault.returned))} USDC went back to your wallet.`
             : "Nothing was left to return."}
         </p>
+        {job.closeTx != null && (
+          <p className="mt-2 flex items-center gap-2 text-xs text-muted">
+            The closing transaction <TxLink hash={job.closeTx} />
+          </p>
+        )}
       </Card>
     );
   }

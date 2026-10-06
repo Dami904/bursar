@@ -195,6 +195,15 @@ describe("operator loop", () => {
     expect(result).toMatchObject({ outcome: "step_limit", steps: 4 });
   });
 
+  it("tells the model two steps before the limit, so a run that has paid still finishes", async () => {
+    const endless = Array.from({ length: 20 }, () => turn([call("get_budget")]));
+    const provider = new ScriptedProvider([endless]);
+    await runOperator({ provider, bursar: fakeBursar().bursar, brief: "b", maxSteps: 5 });
+    const sent = provider.sessions[0]!.results.map((r) => r[r.length - 1]!.content);
+    expect(sent.filter((c) => c.includes("2 steps left"))).toHaveLength(1);
+    expect(sent[2]).toContain("2 steps left");
+  });
+
   it("stops on a refusal", async () => {
     const provider = new ScriptedProvider([[turn([], "", "refused")]]);
     const result = await runOperator({ provider, bursar: fakeBursar().bursar, brief: "b" });

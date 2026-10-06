@@ -1,4 +1,11 @@
-import { agents as agentsTable, authorizations, credentials, jobs, operatorRuns } from "@bursar/db";
+import {
+  agents as agentsTable,
+  authorizations,
+  chainEvents,
+  credentials,
+  jobs,
+  operatorRuns,
+} from "@bursar/db";
 import { eq } from "drizzle-orm";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { createSiweMessage } from "viem/siwe";
@@ -357,6 +364,28 @@ describe("a helper's run", () => {
     expect((result.body.purchases as { id: string }[]).map((d) => d.id)).toEqual([
       mine.decision.id,
     ]);
+  });
+});
+
+describe("the transaction that closed a job", () => {
+  it("is on the job once it is closed, and not before", async () => {
+    const { job, ownerKey } = await seedJob();
+    const vaultJobId = `0x${job.id.replaceAll("-", "").padEnd(64, "0")}`;
+    await db.update(jobs).set({ vaultJobId }).where(eq(jobs.id, job.id));
+    const open = await call("GET", `/jobs/${job.id}`, ownerKey);
+    expect(open.body.closeTx).toBeNull();
+
+    await db.insert(chainEvents).values({
+      txHash: "0xclosed",
+      logIndex: 1,
+      blockNumber: 10,
+      eventName: "Withdrawn",
+      vaultJobId,
+    });
+    // Still open: a withdrawal alone doesn't make it closed.
+    expect((await call("GET", `/jobs/${job.id}`, ownerKey)).body.closeTx).toBeNull();
+    await db.update(jobs).set({ status: "CLOSED" }).where(eq(jobs.id, job.id));
+    expect((await call("GET", `/jobs/${job.id}`, ownerKey)).body.closeTx).toBe("0xclosed");
   });
 });
 

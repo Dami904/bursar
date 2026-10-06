@@ -101,6 +101,8 @@ export interface Job {
   gateway?: { funded: string; drawn: string; available: string; returned: string };
   agents?: number;
   needsYou?: number;
+  /** The transaction that closed the job and returned its money (once closed and indexed). */
+  closeTx?: string | null;
 }
 
 export type PaymentState =
