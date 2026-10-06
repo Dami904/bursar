@@ -12,6 +12,7 @@ import { createSiweMessage } from "viem/siwe";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { ownersBrief } from "../src/services/console.js";
+import { createJob } from "../src/services/jobs.js";
 import { requestSpend } from "../src/services/spend.js";
 import { db, seedJob, spend } from "./support.js";
 
@@ -428,6 +429,46 @@ describe("the jobs' own moments", () => {
     expect(events.map((e) => e.kind).sort()).toEqual(["closed", "created", "funded", "opened"]);
     expect(events.find((e) => e.kind === "closed")?.txHash).toBe("0xshut");
     expect(events.find((e) => e.kind === "created")?.txHash).toBeNull();
+    // A job closed with nothing left to return has no Withdrawn: its status change is the close.
+    const empty = await createJob(db, job.ownerId, {
+      title: "Nothing left",
+      customer: "c",
+      budget: 1_000_000n,
+      perTxCap: 1_000_000n,
+      approvalThreshold: 1_000_000n,
+      windowCap: 1_000_000n,
+      windowSeconds: 3600,
+      expiresAt: new Date(Date.now() + 86_400_000),
+      delegationAllowed: true,
+    });
+    const emptyVault = `0x${empty.id.replaceAll("-", "").padEnd(64, "0")}`;
+    await db
+      .update(jobs)
+      .set({ vaultJobId: emptyVault, status: "CLOSED" })
+      .where(eq(jobs.id, empty.id));
+    await db.insert(chainEvents).values([
+      {
+        txHash: "0xpause",
+        logIndex: 0,
+        blockNumber: 4,
+        eventName: "StatusChanged",
+        vaultJobId: emptyVault,
+      },
+      {
+        txHash: "0xclose",
+        logIndex: 0,
+        blockNumber: 5,
+        eventName: "StatusChanged",
+        vaultJobId: emptyVault,
+      },
+    ]);
+    const after = (await call("GET", "/job-events", ownerKey)).body.events as {
+      kind: string;
+      jobId: string;
+      txHash: string | null;
+    }[];
+    const closedLines = after.filter((e) => e.kind === "closed");
+    expect(closedLines.map((e) => e.txHash).sort()).toEqual(["0xclose", "0xshut"]);
     // Another owner sees none of it.
     const other = await seedJob();
     const theirs = (await call("GET", "/job-events", other.ownerKey)).body.events as unknown[];

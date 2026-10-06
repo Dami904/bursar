@@ -66,11 +66,11 @@ describe("the daybook", () => {
       ],
     );
     expect(html).toContain("Job created");
-    expect(html).toContain("Funded from the owner&#x27;s wallet");
-    expect(html).toContain("Job closed, the unspent USDC returned");
+    expect(html).toContain("USDC paid into the job");
+    expect(html).toContain("Job closed");
     expect(html).toContain(txUrl("0xabc"));
     // Newest first: closed, then the payment, then funded, then created.
-    const order = ["Job closed", "Image generation", "Funded from", "Job created"].map((t) =>
+    const order = ["Job closed", "Image generation", "USDC paid into", "Job created"].map((t) =>
       html.indexOf(t),
     );
     expect(order).toEqual([...order].sort((a, b) => a - b));

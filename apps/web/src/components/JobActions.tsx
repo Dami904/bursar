@@ -1,6 +1,6 @@
 import { formatUsdc } from "@bursar/money";
 import { jobVaultAbi } from "@bursar/payments/chain";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { MoreHorizontal } from "lucide-react";
 import { useState } from "react";
 import type { Hex } from "viem";
@@ -12,7 +12,7 @@ import { money } from "../lib/format.js";
 import { wagmiConfig } from "../lib/wagmi.js";
 import { Button, Card, ErrorLine, TxLink } from "./ui.js";
 
-type Action = "pause" | "unpause" | "closeJob";
+export type Action = "pause" | "unpause" | "closeJob";
 
 /** Reads the job as the vault sees it, and sends the owner's wallet transactions. */
 function useVaultJob(job: Job) {
@@ -41,10 +41,10 @@ function useVaultJob(job: Job) {
     const receipt = await waitForTransactionReceipt(wagmiConfig, { hash });
     if (receipt.status !== "success") throw new Error("The transaction failed on Arc");
     await onChain.refetch();
-    // Closing changes everything the page shows (spent, left, status): refresh it now, not later.
-    void queryClient.invalidateQueries();
-    // The indexer picks the change up within seconds; refresh once it has.
-    setTimeout(() => void queryClient.invalidateQueries(), 3000);
+    // The vault has changed, but Bursar's copy of the job follows only once the indexer has read
+    // the event (seconds). Until then the page would still show the old status, so keep refreshing
+    // the job until it shows the change, then everything else once.
+    void followIndexer(queryClient, job.id, action);
   };
   // JobVault's Status enum: 1 active, 2 paused, 3 closed.
   const status = onChain.data?.status;
@@ -188,4 +188,30 @@ export function stuckClock(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+const EXPECTED_STATUS: Record<Action, Job["status"]> = {
+  pause: "PAUSED",
+  unpause: "ACTIVE",
+  closeJob: "CLOSED",
+};
+
+/** Refreshes a job every 2 seconds, for up to 40, until Bursar shows the status the vault has. */
+export async function followIndexer(
+  queryClient: Pick<QueryClient, "refetchQueries" | "getQueryData" | "invalidateQueries">,
+  jobId: string,
+  action: Action,
+  everyMs = 2_000,
+  tries = 20,
+): Promise<boolean> {
+  for (let i = 0; i < tries; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, everyMs));
+    await queryClient.refetchQueries({ queryKey: ["job", jobId] });
+    if (queryClient.getQueryData<Job>(["job", jobId])?.status === EXPECTED_STATUS[action]) {
+      await queryClient.invalidateQueries();
+      return true;
+    }
+  }
+  await queryClient.invalidateQueries();
+  return false;
 }

@@ -506,6 +506,8 @@ async function pay(deps: ExecutorDeps, auth: AuthorizationRow, logger: Logger): 
           deliverable: outcome.body,
           paymentTx: outcome.settlement.transaction,
           nextAttemptAt: new Date(Date.now() + RETRY_DELAY_MS),
+          // The reply's images can't be fetched again later: keep them now, settled or not.
+          ...(await keptInline(deps, auth.id, outcome.media, logger)),
         });
         logger.warn("seller reports payment but USDC hasn't confirmed the nonce yet", {
           paymentTx: outcome.settlement.transaction,
@@ -658,6 +660,8 @@ async function payGateway(
         await annotate(deps.db, auth.id, {
           deliverable: outcome.body,
           nextAttemptAt: new Date(Date.now() + RETRY_DELAY_MS),
+          // The reply's images can't be fetched again later: keep them now, settled or not.
+          ...(await keptInline(deps, auth.id, outcome.media, logger)),
         });
         logger.warn("seller reports a Gateway payment that Gateway doesn't show yet", {
           reported: outcome.settlement.transaction,

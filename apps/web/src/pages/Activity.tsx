@@ -237,8 +237,8 @@ export function Activity() {
 const MOMENT: Record<JobEvent["kind"], string> = {
   created: "Job created",
   opened: "Opened on Arc",
-  funded: "Funded from the owner's wallet",
-  closed: "Job closed, the unspent USDC returned",
+  funded: "USDC paid into the job",
+  closed: "Job closed",
 };
 
 /** A job's own moment, in the daybook between its payments: lighter than a payment line. */

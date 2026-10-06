@@ -390,20 +390,37 @@ export async function ownerJobEvents(db: Db, ownerId: string, limit = 100): Prom
       .where(
         and(
           inArray(chainEvents.vaultJobId, [...byVault.keys()]),
-          inArray(chainEvents.eventName, ["JobCreated", "Funded", "Withdrawn"]),
+          inArray(chainEvents.eventName, ["JobCreated", "Funded", "Withdrawn", "StatusChanged"]),
         ),
-      );
+      )
+      .orderBy(asc(chainEvents.blockNumber), asc(chainEvents.logIndex));
+    // A closed job's close is its last status change (the same transaction pays back what's left,
+    // when anything is): one line per closed job, whether or not money came back.
+    const closes = new Map<string, (typeof chain)[number]>();
     for (const e of chain) {
       const job = byVault.get(e.vaultJobId ?? "");
       if (job === undefined) continue;
-      // Withdrawn is the vault paying a closed job's money back: that is the close.
-      if (e.eventName === "Withdrawn" && job.status !== "CLOSED") continue;
+      if (e.eventName === "StatusChanged" || e.eventName === "Withdrawn") {
+        if (job.status === "CLOSED") closes.set(job.id, e);
+        continue;
+      }
       events.push({
         id: `${e.eventName}-${e.id}`,
         at: e.appliedAt.toISOString(),
-        kind:
-          e.eventName === "JobCreated" ? "opened" : e.eventName === "Funded" ? "funded" : "closed",
+        kind: e.eventName === "JobCreated" ? "opened" : "funded",
         jobId: job.id,
+        jobTitle: job.title,
+        txHash: e.txHash,
+      });
+    }
+    for (const [jobId, e] of closes) {
+      const job = rows.find((r) => r.id === jobId);
+      if (job === undefined) continue;
+      events.push({
+        id: `closed-${e.id}`,
+        at: e.appliedAt.toISOString(),
+        kind: "closed",
+        jobId,
         jobTitle: job.title,
         txHash: e.txHash,
       });
