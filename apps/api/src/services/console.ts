@@ -373,7 +373,8 @@ export interface JobEvent {
 export async function ownerJobEvents(db: Db, ownerId: string, limit = 100): Promise<JobEvent[]> {
   const rows = await db.select().from(jobs).where(eq(jobs.ownerId, ownerId));
   if (rows.length === 0) return [];
-  const byVault = new Map(rows.filter((j) => j.vaultJobId !== null).map((j) => [j.vaultJobId!, j]));
+  const byVault = new Map<string, (typeof rows)[number]>();
+  for (const j of rows) if (j.vaultJobId !== null) byVault.set(j.vaultJobId, j);
   const events: JobEvent[] = rows.map((j) => ({
     id: `created-${j.id}`,
     at: j.createdAt.toISOString(),

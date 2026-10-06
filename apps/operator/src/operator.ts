@@ -425,8 +425,8 @@ export async function runOperator(options: OperatorOptions): Promise<OperatorRes
       }
       // Two steps from the limit: say so, so a run that has paid still ends with its own summary
       // instead of "stopped without finishing".
-      if (steps === maxSteps - 2 && results.length > 0) {
-        const last = results[results.length - 1]!;
+      const last = results.at(-1);
+      if (steps === maxSteps - 2 && last !== undefined) {
         results[results.length - 1] = {
           ...last,
           content: `${last.content}
