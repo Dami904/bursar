@@ -103,6 +103,8 @@ export interface Job {
   needsYou?: number;
   /** The transaction that closed the job and returned its money (once closed and indexed). */
   closeTx?: string | null;
+  /** When the job's stuck payments will be settled or returned (null when none are stuck). */
+  stuckUntil?: string | null;
 }
 
 export type PaymentState =

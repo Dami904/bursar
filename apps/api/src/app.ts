@@ -57,6 +57,7 @@ import { auditStatus, jobAuditTrail } from "./services/audit.js";
 import { newNonce, signIn, signOut, type SiweConfig } from "./services/auth.js";
 import {
   closeTxOf,
+  stuckUntilOf,
   decisionEvidence,
   jobAgents,
   jobDecisions,
@@ -759,7 +760,11 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
   app.get("/jobs/:id", async (c) => {
     const owner = require(c, "OWNER");
     const job = await getOwnedJob(db, owner.ownerId, c.req.param("id"));
-    return c.json({ ...jobView(job), closeTx: await closeTxOf(db, job) });
+    return c.json({
+      ...jobView(job),
+      closeTx: await closeTxOf(db, job),
+      stuckUntil: await stuckUntilOf(db, job.id),
+    });
   });
 
   /** The job's entries in the hash-chained audit log, each with the anchor on Arc covering it. */

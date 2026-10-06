@@ -389,6 +389,29 @@ describe("the transaction that closed a job", () => {
   });
 });
 
+describe("when stuck payments clear", () => {
+  it("is the latest signature expiry plus the grace, and null when nothing is stuck", async () => {
+    const { agents, job, ownerKey } = await seedJob();
+    expect((await call("GET", `/jobs/${job.id}`, ownerKey)).body.stuckUntil).toBeNull();
+
+    const first = await requestSpend(db, agents[0]!.principal, spend("0.10", "op-stuck-0001"));
+    const second = await requestSpend(db, agents[0]!.principal, spend("0.10", "op-stuck-0002"));
+    const soon = new Date(Date.now() + 3_600_000);
+    const later = new Date(Date.now() + 4 * 86_400_000);
+    for (const [decision, validBefore] of [
+      [first, soon],
+      [second, later],
+    ] as const) {
+      await db
+        .update(authorizations)
+        .set({ state: "UNRESOLVED", validBefore })
+        .where(eq(authorizations.id, decision.authorization!.id));
+    }
+    const { body } = await call("GET", `/jobs/${job.id}`, ownerKey);
+    expect(new Date(body.stuckUntil as string).getTime()).toBe(later.getTime() + 15_000);
+  });
+});
+
 describe("the jobs' own moments", () => {
   it("lists created, opened, funded and closed, with their transactions, for the owner only", async () => {
     const { job, ownerKey } = await seedJob();

@@ -410,3 +410,19 @@ export async function ownerJobEvents(db: Db, ownerId: string, limit = 100): Prom
   }
   return events.sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit);
 }
+
+/** How long after a signed payment expires Bursar waits before it treats the money as unpaid. */
+const EXPIRY_GRACE_MS = 15_000;
+
+/**
+ * When a job's stuck payments will be settled or returned: the latest moment their signatures
+ * expire, plus the grace the reconciler waits. Null when nothing is stuck.
+ */
+export async function stuckUntilOf(db: Db, jobId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ until: sql<Date | null>`max(${authorizations.validBefore})` })
+    .from(authorizations)
+    .where(and(eq(authorizations.jobId, jobId), eq(authorizations.state, "UNRESOLVED")));
+  if (row?.until == null) return null;
+  return new Date(new Date(row.until).getTime() + EXPIRY_GRACE_MS).toISOString();
+}

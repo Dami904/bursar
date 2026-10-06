@@ -107,6 +107,14 @@ export function JobMenu({ job }: { job: Job }) {
             {inFlight
               ? "Close once nothing is held, waiting or stuck."
               : "Closing returns every unspent USDC to your wallet. It can't be undone."}
+            {inFlight && job.stuckUntil != null && (
+              <>
+                {" "}
+                Stuck payments are settled or returned automatically around{" "}
+                <span className="text-ink">{stuckClock(job.stuckUntil)}</span>, once their
+                signatures can no longer be used.
+              </>
+            )}
           </p>
           {act.isPending && <p className="text-xs text-muted">Confirm in your wallet…</p>}
           <ErrorLine error={act.error} />
@@ -169,4 +177,15 @@ export function JobStatusCard({ job }: { job: Job }) {
     );
   }
   return null;
+}
+
+/** "Fri 9 Oct, 17:00": when a stuck payment clears, in the owner's own time. */
+export function stuckClock(iso: string): string {
+  return new Date(iso).toLocaleString([], {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
