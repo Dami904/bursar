@@ -61,12 +61,15 @@ export async function autopilotOnce(deps: AutopilotDeps): Promise<string | null>
           sql`, `,
         )})`;
 
+  // A job goes live on-chain before the owner's deposit lands (they sign the deposit next), so a run
+  // waits for funds: started earlier, it would be refused for an empty job.
   // Claim one due job atomically, so two workers (or two ticks) never start the same run.
   const [claimed] = (await db.execute(sql`
     with next as (
       select id, operator_revenue_seen as seen, operator_run_at as last_run
         from jobs
        where status = 'ACTIVE' and brief is not null and frozen_reason is null
+         and deposited > 0
          and (operator_run_at is null or revenue_received > operator_revenue_seen)
          and ${notCoolingDown}
        order by created_at

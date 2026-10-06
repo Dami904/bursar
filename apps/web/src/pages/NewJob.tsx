@@ -96,6 +96,13 @@ export function NewJob() {
               />
             </Label>
           </div>
+          {Number(threshold) > 0 && Number(threshold) < 0.2 && (
+            <p className="-mt-2 text-xs text-muted">
+              Image sellers on the marketplace charge about 0.05 to 0.15 USDC a call, and some are
+              paid through Circle Gateway, which can't pay more than this approval amount. Set it to
+              0.20 or more if you want the agent to buy images without waiting for you.
+            </p>
+          )}
           <Label text="Ends in" hint="days">
             <input
               className={field}

@@ -223,6 +223,29 @@ describe("autopilot", () => {
     return job;
   }
 
+  it("waits for the owner's deposit: a live but unfunded job isn't run", async () => {
+    const { owner } = await createOwner(db, "Studio");
+    const job = await createJob(db, owner.id, {
+      title: "Unfunded",
+      customer: "Acme",
+      budget: parseUsdc("1.00"),
+      perTxCap: parseUsdc("1.00"),
+      approvalThreshold: parseUsdc("1.00"),
+      windowCap: parseUsdc("1.00"),
+      windowSeconds: 3600,
+      expiresAt: new Date(Date.now() + 86_400_000),
+      delegationAllowed: true,
+      brief: "Buy one insight line for the newsletter.",
+    });
+    await recordJobCreatedOnChain(db, job.id, `vault-${job.id}`);
+    const fake = fakeRuns();
+    expect(await autopilotOnce({ ...fake.deps, db })).toBeNull();
+    await recordFunding(db, job.id, parseUsdc("1.00"));
+    expect(await autopilotOnce({ ...fake.deps, db })).toBe(job.id);
+    fake.finish();
+    await settle();
+  });
+
   it("tells a repeat of the same brief not to buy again what an earlier run delivered", async () => {
     const job = await jobWithHistory("Buy one insight line for the newsletter.");
     const fake = fakeRuns();
