@@ -60,6 +60,7 @@ import {
   jobAgents,
   jobDecisions,
   ownerActivity,
+  ownerJobEvents,
   jobPayees,
   jobRuns,
   listJobs,
@@ -649,6 +650,12 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
   app.get("/jobs/:id/agents", async (c) => {
     const owner = require(c, "OWNER");
     return c.json({ agents: await jobAgents(db, owner.ownerId, c.req.param("id")) });
+  });
+
+  /** The life of the owner's jobs (created, opened, funded, closed), for the daybook. */
+  app.get("/job-events", async (c) => {
+    const owner = require(c, "OWNER");
+    return c.json({ events: await ownerJobEvents(db, owner.ownerId) });
   });
 
   app.get("/decisions", async (c) => {

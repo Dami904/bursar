@@ -356,3 +356,57 @@ export async function closeTxOf(
     .limit(1);
   return row?.txHash ?? null;
 }
+
+export interface JobEvent {
+  id: string;
+  at: string;
+  kind: "created" | "opened" | "funded" | "closed";
+  jobId: string;
+  jobTitle: string;
+  txHash: string | null;
+}
+
+/**
+ * The life of the owner's jobs, for the daybook beside the payments: created, opened on Arc,
+ * funded, closed. Opened, funded and closed come with the vault transaction that did it.
+ */
+export async function ownerJobEvents(db: Db, ownerId: string, limit = 100): Promise<JobEvent[]> {
+  const rows = await db.select().from(jobs).where(eq(jobs.ownerId, ownerId));
+  if (rows.length === 0) return [];
+  const byVault = new Map(rows.filter((j) => j.vaultJobId !== null).map((j) => [j.vaultJobId!, j]));
+  const events: JobEvent[] = rows.map((j) => ({
+    id: `created-${j.id}`,
+    at: j.createdAt.toISOString(),
+    kind: "created",
+    jobId: j.id,
+    jobTitle: j.title,
+    txHash: null,
+  }));
+  if (byVault.size > 0) {
+    const chain = await db
+      .select()
+      .from(chainEvents)
+      .where(
+        and(
+          inArray(chainEvents.vaultJobId, [...byVault.keys()]),
+          inArray(chainEvents.eventName, ["JobCreated", "Funded", "Withdrawn"]),
+        ),
+      );
+    for (const e of chain) {
+      const job = byVault.get(e.vaultJobId ?? "");
+      if (job === undefined) continue;
+      // Withdrawn is the vault paying a closed job's money back: that is the close.
+      if (e.eventName === "Withdrawn" && job.status !== "CLOSED") continue;
+      events.push({
+        id: `${e.eventName}-${e.id}`,
+        at: e.appliedAt.toISOString(),
+        kind:
+          e.eventName === "JobCreated" ? "opened" : e.eventName === "Funded" ? "funded" : "closed",
+        jobId: job.id,
+        jobTitle: job.title,
+        txHash: e.txHash,
+      });
+    }
+  }
+  return events.sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit);
+}

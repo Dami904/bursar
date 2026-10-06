@@ -389,6 +389,29 @@ describe("the transaction that closed a job", () => {
   });
 });
 
+describe("the jobs' own moments", () => {
+  it("lists created, opened, funded and closed, with their transactions, for the owner only", async () => {
+    const { job, ownerKey } = await seedJob();
+    const vaultJobId = `0x${job.id.replaceAll("-", "").padEnd(64, "0")}`;
+    await db.update(jobs).set({ vaultJobId, status: "CLOSED" }).where(eq(jobs.id, job.id));
+    await db.insert(chainEvents).values([
+      { txHash: "0xopen", logIndex: 0, blockNumber: 1, eventName: "JobCreated", vaultJobId },
+      { txHash: "0xfund", logIndex: 1, blockNumber: 2, eventName: "Funded", vaultJobId },
+      { txHash: "0xshut", logIndex: 2, blockNumber: 3, eventName: "Withdrawn", vaultJobId },
+      { txHash: "0xother", logIndex: 3, blockNumber: 3, eventName: "Released", vaultJobId },
+    ]);
+    const { body } = await call("GET", "/job-events", ownerKey);
+    const events = body.events as { kind: string; txHash: string | null }[];
+    expect(events.map((e) => e.kind).sort()).toEqual(["closed", "created", "funded", "opened"]);
+    expect(events.find((e) => e.kind === "closed")?.txHash).toBe("0xshut");
+    expect(events.find((e) => e.kind === "created")?.txHash).toBeNull();
+    // Another owner sees none of it.
+    const other = await seedJob();
+    const theirs = (await call("GET", "/job-events", other.ownerKey)).body.events as unknown[];
+    expect(theirs).toHaveLength(1);
+  });
+});
+
 describe("a result page", () => {
   it("shows one run's answer with only the purchases made for it, and what they cost", async () => {
     const { agents, job, ownerKey } = await seedJob();

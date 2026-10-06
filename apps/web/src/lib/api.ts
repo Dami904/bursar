@@ -185,3 +185,13 @@ export interface PendingApproval {
   requestedAt: string;
   typedData: unknown;
 }
+
+/** A moment in a job's life, shown in the daybook beside its payments. */
+export interface JobEvent {
+  id: string;
+  at: string;
+  kind: "created" | "opened" | "funded" | "closed";
+  jobId: string;
+  jobTitle: string;
+  txHash: string | null;
+}

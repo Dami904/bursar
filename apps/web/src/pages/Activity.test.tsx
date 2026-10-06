@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
-import type { Decision } from "../lib/api.js";
+import type { Decision, JobEvent } from "../lib/api.js";
 import { txUrl } from "../lib/config.js";
 import { Activity } from "./Activity.js";
 
@@ -26,9 +26,10 @@ const row = (over: Partial<Decision>): Decision => ({
   ...over,
 });
 
-function page(decisions: Decision[]) {
+function page(decisions: Decision[], events: JobEvent[] = []) {
   const client = new QueryClient();
   client.setQueryData(["activity"], { decisions });
+  client.setQueryData(["job-events"], { events });
   return renderToStaticMarkup(
     <QueryClientProvider client={client}>
       <MemoryRouter>
@@ -52,6 +53,28 @@ describe("the daybook", () => {
     expect(html).toContain("Seller not allowed");
     expect(html).toContain('href="/app/decisions/paid-1"');
     expect(html).toContain("Today");
+  });
+
+  it("shows the jobs' own moments between the payments: created, funded, closed", () => {
+    const at = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+    const html = page(
+      [row({ id: "paid-1", at: at(30) })],
+      [
+        { id: "e3", at: at(5), kind: "closed", jobId: "j1", jobTitle: "Flier", txHash: "0xabc" },
+        { id: "e2", at: at(40), kind: "funded", jobId: "j1", jobTitle: "Flier", txHash: "0xdef" },
+        { id: "e1", at: at(50), kind: "created", jobId: "j1", jobTitle: "Flier", txHash: null },
+      ],
+    );
+    expect(html).toContain("Job created");
+    expect(html).toContain("Funded from the owner&#x27;s wallet");
+    expect(html).toContain("Job closed, the unspent USDC returned");
+    expect(html).toContain(txUrl("0xabc"));
+    // Newest first: closed, then the payment, then funded, then created.
+    const order = ["Job closed", "Image generation", "Funded from", "Job created"].map((t) =>
+      html.indexOf(t),
+    );
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(order.every((i) => i >= 0)).toBe(true);
   });
 
   it("shows a picture a purchase delivered in place of the agent's mark", () => {

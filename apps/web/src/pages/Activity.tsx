@@ -12,7 +12,7 @@ import {
   Skeleton,
   TxLink,
 } from "../components/ui.js";
-import { api, type Decision, type PendingApproval } from "../lib/api.js";
+import { api, type Decision, type JobEvent, type PendingApproval } from "../lib/api.js";
 import { useApprove, useReject } from "../lib/approve.js";
 import { config } from "../lib/config.js";
 import {
@@ -69,6 +69,10 @@ export function Activity() {
     queryKey: ["activity"],
     queryFn: () => api<{ decisions: Decision[] }>("/decisions?limit=200"),
   });
+  const lifeQuery = useQuery({
+    queryKey: ["job-events"],
+    queryFn: () => api<{ events: JobEvent[] }>("/job-events"),
+  });
   const [filter, setFilter] = useState<Filter>("all");
   const [params, setParams] = useSearchParams();
   const all = q.data?.decisions ?? [];
@@ -105,13 +109,24 @@ export function Activity() {
   });
 
   // Group by day, keeping newest first.
-  const days: { day: string; rows: Decision[] }[] = [];
-  for (const d of shown) {
-    const day = dayOf(d.at);
-    const last = days.at(-1);
-    if (last?.day === day) last.rows.push(d);
-    else days.push({ day, rows: [d] });
-  }
+  const days: { day: string; rows: Decision[]; marks: JobEvent[] }[] = [];
+  const dayFor = (iso: string) => {
+    const day = dayOf(iso);
+    let group = days.find((g) => g.day === day);
+    if (group === undefined) {
+      group = { day, rows: [], marks: [] };
+      days.push(group);
+    }
+    return group;
+  };
+  for (const d of shown) dayFor(d.at).rows.push(d);
+  // The jobs' own moments (created, opened, funded, closed) show with everything, not with a filter.
+  const marks = filter === "all" ? (lifeQuery.data?.events ?? []) : [];
+  for (const m of marks) dayFor(m.at).marks.push(m);
+  days.sort((a, b) => {
+    const at = (g: (typeof days)[number]) => g.rows[0]?.at ?? g.marks[0]?.at ?? "";
+    return at(b).localeCompare(at(a));
+  });
 
   return (
     <main>
@@ -169,7 +184,7 @@ export function Activity() {
       {shown.length > 0 && (
         <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_24rem] lg:gap-8">
           <div>
-            {days.map(({ day, rows }) => {
+            {days.map(({ day, rows, marks: dayMarks }) => {
               const paid = rows
                 .filter((d) => statusOf(d).tone === "paid")
                 .reduce((sum, d) => sum + Math.round(Number(d.amount) * 1_000_000), 0);
@@ -186,14 +201,23 @@ export function Activity() {
                     </span>
                   </div>
                   <ul>
-                    {rows.map((d) => (
-                      <DaybookLine
-                        key={d.id}
-                        d={d}
-                        active={selected?.id === d.id}
-                        onSelect={() => select(d.id)}
-                      />
-                    ))}
+                    {[
+                      ...rows.map((d) => ({ at: d.at, d, m: undefined })),
+                      ...dayMarks.map((m) => ({ at: m.at, d: undefined, m })),
+                    ]
+                      .sort((a, b) => b.at.localeCompare(a.at))
+                      .map((row) =>
+                        row.d !== undefined ? (
+                          <DaybookLine
+                            key={row.d.id}
+                            d={row.d}
+                            active={selected?.id === row.d.id}
+                            onSelect={() => select(row.d.id)}
+                          />
+                        ) : (
+                          <JobMoment key={row.m.id} m={row.m} />
+                        ),
+                      )}
                   </ul>
                 </section>
               );
@@ -207,6 +231,27 @@ export function Activity() {
         </div>
       )}
     </main>
+  );
+}
+
+const MOMENT: Record<JobEvent["kind"], string> = {
+  created: "Job created",
+  opened: "Opened on Arc",
+  funded: "Funded from the owner's wallet",
+  closed: "Job closed, the unspent USDC returned",
+};
+
+/** A job's own moment, in the daybook between its payments: lighter than a payment line. */
+function JobMoment({ m }: { m: JobEvent }) {
+  return (
+    <li className="flex items-center gap-3 border-b border-dotted border-line py-2.5 text-sm text-muted">
+      <span className="w-12 shrink-0 font-mono text-xs">{clock(m.at)}</span>
+      <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-seal" />
+      <span className="min-w-0 flex-1 truncate">
+        {MOMENT[m.kind]} <span className="text-ink">· {m.jobTitle}</span>
+      </span>
+      {m.txHash !== null && <TxLink hash={m.txHash} />}
+    </li>
   );
 }
 
