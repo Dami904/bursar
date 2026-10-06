@@ -193,6 +193,7 @@ export async function startWorker(env: WorkerEnv): Promise<RunningWorker | null>
       }
       try {
         await executeOnce({
+          mediaStore,
           db,
           client,
           operator,

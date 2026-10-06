@@ -37,6 +37,7 @@ import {
   type WalletClient,
 } from "viem";
 import { errorText, log, type Logger } from "./log.js";
+import { keepInlineMedia, type MediaFile, type MediaStore } from "./media.js";
 
 export interface ExecutorDeps {
   readonly db: Db;
@@ -51,6 +52,11 @@ export interface ExecutorDeps {
   readonly receiptTimeoutMs?: number;
   /** Local development only: pay sellers on private addresses (127.0.0.1). */
   readonly allowPrivateHosts?: boolean;
+  /**
+   * Where delivered files are kept. With one, an image a seller returns inside its reply is saved
+   * at payment time (the stored copy of a reply is cut short, so later would be too late).
+   */
+  readonly mediaStore?: MediaStore | null;
 }
 
 const RECEIPT_TIMEOUT_MS = 30_000;
@@ -470,6 +476,7 @@ async function pay(deps: ExecutorDeps, auth: AuthorizationRow, logger: Logger): 
   await assertRequestUnchanged(deps, auth);
   const outcome = await sendPayment(stored.pollUrl ?? auth.paymentUrl, stored.signedHeader, {
     allowPrivateHosts: deps.allowPrivateHosts === true,
+    keepInlineMedia: deps.mediaStore != null,
     // Collecting a ticket is a plain GET; the order itself is sent as it was quoted.
     ...(stored.request === undefined || stored.pollUrl !== undefined
       ? {}
@@ -486,7 +493,11 @@ async function pay(deps: ExecutorDeps, auth: AuthorizationRow, logger: Logger): 
           deps.db,
           auth.id,
           "SETTLED",
-          { paymentTx: outcome.settlement.transaction, deliverable: outcome.body },
+          {
+            paymentTx: outcome.settlement.transaction,
+            deliverable: outcome.body,
+            ...(await keptInline(deps, auth.id, outcome.media, logger)),
+          },
           { expectFrom: "SIGNING" },
         );
         logger.info("purchase settled", { paymentTx: outcome.settlement.transaction });
@@ -616,6 +627,7 @@ async function payGateway(
   await assertRequestUnchanged(deps, auth);
   const outcome = await sendPayment(stored.pollUrl ?? auth.paymentUrl, stored.signedHeader, {
     allowPrivateHosts: deps.allowPrivateHosts === true,
+    keepInlineMedia: deps.mediaStore != null,
     // Collecting a ticket is a plain GET; the order itself is sent as it was quoted.
     ...(stored.request === undefined || stored.pollUrl !== undefined
       ? {}
@@ -634,7 +646,11 @@ async function payGateway(
           deps.db,
           auth.id,
           "SETTLED",
-          { gatewayTransferId: transfer.id, deliverable: outcome.body },
+          {
+            gatewayTransferId: transfer.id,
+            deliverable: outcome.body,
+            ...(await keptInline(deps, auth.id, outcome.media, logger)),
+          },
           { expectFrom: "SIGNING" },
         );
         logger.info("gateway payment settled", { transferId: transfer.id });
@@ -762,4 +778,26 @@ export function revertReason(error: unknown): string | null {
     return reverted.data?.errorName ?? reverted.reason ?? "reverted";
   }
   return null;
+}
+
+/**
+ * Saves the images a seller sent inside its reply, as the `media` a settled payment carries. Empty
+ * when there is none, no store, or saving failed: then the result is left to the usual look at its
+ * links, and the page just has no picture.
+ */
+async function keptInline(
+  deps: ExecutorDeps,
+  authorizationId: string,
+  inline: readonly { readonly base64: string }[] | undefined,
+  logger: Logger,
+): Promise<{ media?: MediaFile[] }> {
+  if (inline === undefined || inline.length === 0 || deps.mediaStore == null) return {};
+  try {
+    const media = await keepInlineMedia(deps.mediaStore, authorizationId, inline);
+    if (media.length > 0) logger.info("kept inline media", { files: media.length });
+    return media.length > 0 ? { media } : {};
+  } catch (error) {
+    logger.warn("couldn't keep inline media", { error: errorText(error) });
+    return {};
+  }
 }

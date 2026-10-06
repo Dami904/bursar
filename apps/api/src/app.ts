@@ -42,6 +42,7 @@ import {
 } from "./http/rate-limit.js";
 import { agentView, authorizationView, decisionView, jobView } from "./http/views.js";
 import { createAgent, replaceAgent, revokeAgent, spawnSubagent } from "./services/agents.js";
+import { gatewayAboveApproval } from "./services/gateway-limit.js";
 import { addPayee, createJob, getOwnedJob, setCategoryLimit } from "./services/jobs.js";
 import { approve, createApprover, listPending, reject } from "./services/approvals.js";
 import {
@@ -955,6 +956,15 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
             : `The seller asks ${formatUsdc(quoted.amount)} USDC, above this job's limit of ${formatUsdc(via.maxPrice)} per marketplace call`,
         );
       }
+    }
+
+    if (quoted.rail === "GATEWAY") {
+      const [job] = await db.select().from(jobs).where(eq(jobs.id, agent.jobId));
+      const tooHigh =
+        job === undefined
+          ? null
+          : gatewayAboveApproval(quoted.rail, quoted.amount, job.approvalThreshold);
+      if (tooHigh !== null) throw new HttpError(422, "GATEWAY_ABOVE_APPROVAL", tooHigh);
     }
 
     const result = await requestSpend(db, agent, {

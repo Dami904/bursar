@@ -239,6 +239,33 @@ export async function keepMediaOnce(deps: MediaDeps): Promise<number> {
   return kept;
 }
 
+/**
+ * Saves images a seller sent inside its reply (data URLs). The payment step has them whole, before
+ * the stored copy of the reply is cut short, so this is the one chance to keep them. Anything that
+ * isn't really an image (checked by its first bytes), or is too large, is skipped.
+ */
+export async function keepInlineMedia(
+  store: MediaStore,
+  authorizationId: string,
+  inline: readonly { readonly base64: string }[],
+  maxBytes = DEFAULT_MAX_BYTES,
+): Promise<MediaFile[]> {
+  const files: MediaFile[] = [];
+  for (const [index, item] of inline.slice(0, MAX_CANDIDATES).entries()) {
+    const bytes = Buffer.from(item.base64, "base64");
+    const contentType = sniffImage(bytes);
+    if (contentType === null || bytes.byteLength > maxBytes) continue;
+    const extension = EXTENSIONS[contentType] ?? "bin";
+    const url = await store(
+      `media/${authorizationId}/inline-${index}.${extension}`,
+      bytes,
+      contentType,
+    );
+    files.push({ url, kind: "image", contentType, bytes: bytes.byteLength });
+  }
+  return files;
+}
+
 /** Vercel Blob as the store. Files are public, under an unguessable address. */
 export function blobStore(token: string): MediaStore {
   return async (path, bytes, contentType) => {

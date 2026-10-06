@@ -412,6 +412,52 @@ describe("sellers that deliver later (a ticket to collect with)", () => {
   });
 });
 
+describe("an image the seller sends inside its reply", () => {
+  it("is saved whole at payment time, though the stored reply is cut short", async () => {
+    const saved: { path: string; bytes: number }[] = [];
+    const mediaStore = async (path: string, bytes: Uint8Array) => {
+      saved.push({ path, bytes: bytes.byteLength });
+      return `https://blob.test/${path}`;
+    };
+    const { principal } = await liveJob();
+    seller.mode = "inline-image";
+    try {
+      const auth = await purchase(principal, "op-inline-000001");
+      const done = await runUntil(auth.id, ["SETTLED"], () => executeOnce({ ...deps, mediaStore }));
+      expect(done.state).toBe("SETTLED");
+      expect(saved).toHaveLength(1);
+      expect(saved[0]!.bytes).toBeGreaterThan(200_000);
+      expect(done.media).toEqual([
+        expect.objectContaining({
+          kind: "image",
+          contentType: "image/png",
+          bytes: saved[0]!.bytes,
+        }),
+      ]);
+      // The stored reply is small and valid, and says where the image went.
+      expect(done.deliverable!.length).toBeLessThan(1_000);
+      expect(done.deliverable).toContain("kept separately");
+      expect(JSON.parse(done.deliverable!)).toBeTruthy();
+    } finally {
+      seller.mode = "normal";
+    }
+  });
+
+  it("is left alone when no storage is configured", async () => {
+    const { principal } = await liveJob();
+    seller.mode = "inline-image";
+    try {
+      const auth = await purchase(principal, "op-inline-000002");
+      const done = await runUntil(auth.id, ["SETTLED"]);
+      expect(done.state).toBe("SETTLED");
+      expect(done.media).toBeNull();
+      expect(done.deliverable).toContain("[truncated]");
+    } finally {
+      seller.mode = "normal";
+    }
+  });
+});
+
 describe("keeping delivered media", () => {
   /** A settled purchase whose answer is `answer` (the seller's answer is replaced after the fact). */
   async function settledWith(op: string, answer: unknown) {

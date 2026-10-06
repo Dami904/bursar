@@ -260,6 +260,8 @@ export const TINY_PNG = Buffer.from(
 
 export type SellerMode =
   | "normal"
+  /** Settles, and answers with a large image inside the reply (a base64 data URL), as some models do. */
+  | "inline-image"
   | "refuse"
   | "settle-then-crash"
   | "drop"
@@ -394,6 +396,13 @@ export async function startSeller(
           payer: auth.from!,
         }),
       });
+      if (state.mode === "inline-image") {
+        // Far more than the stored copy of a reply can hold: the end of the image would be cut off.
+        const big = Buffer.concat([TINY_PNG, Buffer.alloc(200_000, 7)]);
+        return res.end(
+          JSON.stringify({ data: [{ url: `data:image/png;base64,${big.toString("base64")}` }] }),
+        );
+      }
       res.end(asyncMode ? '{"id":"1","status":"completed"}' : '{"insight":"paid"}');
     })().catch((error: unknown) => {
       res.writeHead(500);
