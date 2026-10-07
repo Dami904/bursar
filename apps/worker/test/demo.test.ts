@@ -17,12 +17,20 @@ import { parseUsdc } from "@bursar/money";
 import { eq, sql } from "drizzle-orm";
 import { generatePrivateKey } from "viem/accounts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { createJob, recordFunding, recordJobCreatedOnChain } from "../../api/src/services/jobs.js";
+import { createAgent } from "../../api/src/services/agents.js";
+import {
+  addPayee,
+  createJob,
+  recordFunding,
+  recordJobCreatedOnChain,
+} from "../../api/src/services/jobs.js";
 import { createOwner } from "../../api/src/services/owners.js";
+import { requestSpend } from "../../api/src/services/spend.js";
 import { testDatabaseUrl } from "../../api/test/global-setup.js";
 import {
   DEMO_BRIEFS,
   approveDemoPayments,
+  demoApprovalWaiting,
   rotateDemoBrief,
   serveDemoClick,
   type DemoDeps,
@@ -166,6 +174,42 @@ describe("demo approver", () => {
       deadline: 1790000000,
       policyVersion: 2,
     });
+  });
+
+  it("only has work when a demo payment has waited long enough, so an idle server can sleep", async () => {
+    const job = await demoJob();
+    const approver = {
+      apiUrl: "http://api.test",
+      key: "bsr_apr_x",
+      privateKey: generatePrivateKey(),
+      afterMs: 60_000,
+    };
+    expect(await demoApprovalWaiting(deps(job.id, { approver }))).toBe(false);
+
+    // An invoice above the job's 0.10 approval threshold waits for an approver.
+    const vendor = `0x${"4".repeat(40)}`;
+    await addPayee(db, job.ownerId, job.id, { kind: "ADDRESS", value: vendor });
+    const { agent } = await createAgent(db, job.ownerId, job.id, { name: "Op", role: "operator" });
+    const spend = await requestSpend(
+      db,
+      { role: "AGENT", credentialId: "t", ownerId: job.ownerId, jobId: job.id, agentId: agent.id },
+      {
+        operationId: "op-demo-wait-1",
+        kind: "INVOICE",
+        payee: { kind: "ADDRESS", value: vendor },
+        amount: parseUsdc("0.25"),
+        invoiceRef: "VO-12",
+        reasoning: "demo test",
+      },
+    );
+    expect(spend.authorization?.state).toBe("PENDING_APPROVAL");
+
+    // Too fresh: still nothing to do.
+    expect(await demoApprovalWaiting(deps(job.id, { approver }))).toBe(false);
+    const later = new Date(Date.now() + 2 * 60_000);
+    expect(await demoApprovalWaiting(deps(job.id, { approver, now: () => later }))).toBe(true);
+    // Without an approver configured there's never anything to do.
+    expect(await demoApprovalWaiting(deps(job.id, { now: () => later }))).toBe(false);
   });
 });
 

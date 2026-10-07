@@ -17,7 +17,12 @@ import type { WorkerEnv } from "./env.js";
 import { deliverAlerts, pollTelegram, produceAlerts } from "./alerts.js";
 import { anchorOnce } from "./anchor.js";
 import { autopilotOnce } from "./autopilot.js";
-import { approveDemoPayments, rotateDemoBrief, serveDemoClick } from "./demo.js";
+import {
+  approveDemoPayments,
+  demoApprovalWaiting,
+  rotateDemoBrief,
+  serveDemoClick,
+} from "./demo.js";
 import { executeOnce } from "./executor.js";
 import { floatsOnce } from "./floats.js";
 import { indexOnce } from "./indexer.js";
@@ -267,7 +272,7 @@ export async function startWorker(env: WorkerEnv): Promise<RunningWorker | null>
         try {
           if (env.DEMO_MODE === "auto") await rotateDemoBrief(demo);
           else await serveDemoClick(demo);
-          await approveDemoPayments(demo);
+          if (await demoApprovalWaiting(demo)) await approveDemoPayments(demo);
         } catch (error) {
           log.error("demo tick failed", error);
         }

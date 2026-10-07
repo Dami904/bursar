@@ -1,5 +1,12 @@
-import { DEMO_SCENES, chainCursors, jobs, serveDemoRequest, type Db } from "@bursar/db";
-import { eq } from "drizzle-orm";
+import {
+  DEMO_SCENES,
+  authorizations,
+  chainCursors,
+  jobs,
+  serveDemoRequest,
+  type Db,
+} from "@bursar/db";
+import { and, eq, lte } from "drizzle-orm";
 import type { Hex, TypedDataDefinition } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { log } from "./log.js";
@@ -69,6 +76,29 @@ interface Pending {
   requestedAt: string;
   typedData:
     (TypedDataDefinition & { message: { deadline: string; policyVersion: string } }) | null;
+}
+
+/**
+ * Whether the demo job has a payment that has waited `afterMs` for approval. Read from the
+ * database, so the approver only calls the API (through its public address) when there's work.
+ * Calling it every half minute regardless was traffic that kept a free server from ever sleeping.
+ */
+export async function demoApprovalWaiting(deps: DemoDeps): Promise<boolean> {
+  const a = deps.approver;
+  if (a === undefined) return false;
+  const now = (deps.now ?? (() => new Date()))();
+  const [row] = await deps.db
+    .select({ id: authorizations.id })
+    .from(authorizations)
+    .where(
+      and(
+        eq(authorizations.jobId, deps.jobId),
+        eq(authorizations.state, "PENDING_APPROVAL"),
+        lte(authorizations.createdAt, new Date(now.getTime() - a.afterMs)),
+      ),
+    )
+    .limit(1);
+  return row !== undefined;
 }
 
 /** Approves the demo job's waiting payments once they've waited `afterMs`. Returns how many. */
