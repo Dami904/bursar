@@ -1,23 +1,14 @@
-import { chainCursors, jobs, type Db } from "@bursar/db";
+import { DEMO_SCENES, chainCursors, jobs, serveDemoRequest, type Db } from "@bursar/db";
 import { eq } from "drizzle-orm";
 import type { Hex, TypedDataDefinition } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { log } from "./log.js";
 
 /**
- * The public demo job runs itself: every few hours it gets the next brief in a short-film story,
- * and the autopilot does the rest. Together they show every kind of decision: purchases, one that
- * waits for approval, an invoice, one that's blocked, and sub-cent nanopayments through Circle
- * Gateway.
+ * The public demo job's scenes (shared with the API, which offers them to visitors). In the old
+ * automatic mode the next one is set every few hours; by default it's set when a visitor clicks.
  */
-export const DEMO_BRIEFS = [
-  "We're making a 60-second film about AI agents and money. Buy one line of script dialogue for the next scene from the allowed seller, and report it.",
-  "Scene 2 needs a picture. Buy one stock image brief from the allowed seller and describe it.",
-  "The closing scene needs numbers. Buy the market report from the allowed seller and summarise it in one line.",
-  "The voice-over artist sent invoice VO-12 for 0.08 USDC for the narration, delivered and checked. Pay it to their wallet on the allow-list.",
-  "Delegate: spawn a helper with a 0.03 USDC limit and have it buy the market report for the credits. Report what happened.",
-  "Sound and captions: buy three sound cues and one caption from the allowed seller's nanopayment items (sub-cent, paid through Circle Gateway), then list what you got.",
-];
+export const DEMO_BRIEFS: readonly string[] = DEMO_SCENES.map((scene) => scene.brief);
 
 export interface DemoDeps {
   readonly db: Db;
@@ -41,7 +32,16 @@ export interface DemoDeps {
 
 const CURSOR = "demo-brief";
 
-/** Moves the demo job to its next brief when the last run is old enough. Returns the brief set. */
+/**
+ * On-demand mode: moves the demo job to its next scene when a visitor has clicked "Run a scene".
+ * Nothing runs without a click. Returns the brief set.
+ */
+export async function serveDemoClick(deps: DemoDeps): Promise<string | null> {
+  if (deps.running.has(deps.jobId)) return null;
+  return serveDemoRequest(deps.db, deps.jobId, (deps.now ?? (() => new Date()))());
+}
+
+/** Automatic mode: moves the demo job to its next brief when the last run is old enough. Returns the brief set. */
 export async function rotateDemoBrief(deps: DemoDeps): Promise<string | null> {
   const now = (deps.now ?? (() => new Date()))();
   if (deps.running.has(deps.jobId)) return null;

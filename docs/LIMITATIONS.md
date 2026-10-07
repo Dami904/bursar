@@ -6,7 +6,7 @@ What Bursar does **not** do yet, stated plainly. Updated as the build progresses
 
 - **The demo job is public on purpose.** `/demo` shows one job, set by `DEMO_JOB_ID`, to anyone: its decisions, the agents' reasoning, payees and evidence. It's our own business's job. The public API serves no other job's data (tested).
 - **The demo's approvals are automatic.** A demo approver (a key the server holds, allowed only on the demo job in the vault) signs the demo job's payments after a minute, so the public feed shows approvals without a person on call. Real jobs are never approved this way.
-- **The demo's story repeats.** Its brief rotates through five scenes every few hours; the operator gets a summary of earlier runs so it doesn't buy the same thing twice in a row.
+- **The demo's story repeats.** It runs only when a visitor clicks, one scene at a time through six scenes, paced so the budget lasts; the operator gets a summary of earlier runs so it doesn't buy the same thing twice in a row.
 
 ## Day 9
 

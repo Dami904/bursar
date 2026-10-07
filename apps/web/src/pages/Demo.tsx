@@ -1,9 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import { Link } from "react-router";
 import { AgentsSection, PayeesSection, type Payee } from "../components/JobSetup.js";
 import { Results } from "../components/Results.js";
-import { BudgetBar, Button, Loading } from "../components/ui.js";
+import { BudgetBar, Button, ErrorLine, Loading } from "../components/ui.js";
 import { api, ApiError, type Agent, type Decision, type Job, type Run } from "../lib/api.js";
 import { addressUrl, config, txUrl } from "../lib/config.js";
 import { money } from "../lib/format.js";
@@ -38,17 +38,87 @@ export function Demo() {
       <main className="mx-auto max-w-5xl px-5 pb-24 pt-8">
         {q.data && (
           <div className="mb-8 rounded-2xl border border-seal bg-seal-bg px-4 py-3 text-sm text-seal-text">
-            A real job on Arc {config.mainnet ? "mainnet, spending real USDC" : "testnet"}, run by
-            Bursar's own AI operator. Every transaction opens on the chain. Payments above 0.10 USDC
-            are approved by a demo approver after a minute.
+            A real job on Arc {config.mainnet ? "mainnet, spending real USDC" : "testnet"}, worked
+            by Bursar's own AI operator. Every transaction opens on the chain. Payments above 0.10
+            USDC are approved by a demo approver after a minute.
           </div>
         )}
+        {q.data && <RunPanel />}
         {q.isPending && <Loading />}
         {q.error && <DemoUnavailable error={q.error} onRetry={() => void q.refetch()} />}
         {q.data && <DemoJob data={q.data} />}
       </main>
       <Footer />
     </div>
+  );
+}
+
+export interface RunStatus {
+  enabled: boolean;
+  canRun?: boolean;
+  message?: string | null;
+  retryAfterSeconds?: number | null;
+  next?: { number: number; of: number; title: string; maxCost: string };
+  runsToday?: number;
+  maxPerDay?: number;
+}
+
+/**
+ * The demo doesn't run on its own: a visitor starts the next scene here, and Bursar's AI operator
+ * works it live. The server paces it (a few minutes apart, a few a day, and the budget is spread
+ * to last), and says why when it says not now.
+ */
+export function RunPanel() {
+  const queryClient = useQueryClient();
+  const status = useQuery({
+    queryKey: ["demo-run"],
+    queryFn: () => api<RunStatus>("/demo/run"),
+    refetchInterval: 15_000,
+  });
+  const run = useMutation({
+    mutationFn: () => api<RunStatus>("/demo/run", { body: {} }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["demo-run"] });
+      void queryClient.invalidateQueries({ queryKey: ["demo"] });
+    },
+  });
+  const s = status.data;
+  if (s === undefined || !s.enabled || s.next === undefined) return null;
+  const started = run.isSuccess;
+  return (
+    <section className="mb-8 rounded-2xl border border-line bg-surface p-5">
+      <p className="text-xs font-medium uppercase tracking-[0.18em] text-seal">Run it yourself</p>
+      <h2 className="mt-1 text-lg font-medium">
+        Scene {s.next.number} of {s.next.of}: {s.next.title}
+      </h2>
+      <p className="mt-1 text-sm text-muted">
+        Starts Bursar's AI operator on this job, live. It spends up to {s.next.maxCost} testnet
+        USDC, and every payment opens on Arc.
+      </p>
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <Button
+          primary
+          disabled={s.canRun !== true || run.isPending || started}
+          onClick={() => run.mutate()}
+        >
+          {run.isPending ? "Starting…" : started ? "Scene started" : "Run this scene"}
+        </Button>
+        {started ? (
+          <span className="text-sm text-muted">
+            The operator begins within half a minute. Scenes with an approval take about two
+            minutes. This page updates as it works.
+          </span>
+        ) : s.canRun !== true && s.message ? (
+          <span className="text-sm text-muted">{s.message}</span>
+        ) : null}
+      </div>
+      {s.runsToday !== undefined && s.maxPerDay !== undefined && (
+        <p className="mt-3 text-xs text-muted">
+          Scenes run in the last 24 hours: {s.runsToday} of {s.maxPerDay}
+        </p>
+      )}
+      <ErrorLine error={run.error} />
+    </section>
   );
 }
 
@@ -65,7 +135,7 @@ export function DemoUnavailable({ error, onRetry }: { error: unknown; onRetry: (
       </h1>
       <p className="mt-3 text-muted">
         {missing
-          ? "A fresh demo job is being funded on Arc. It will run on its own once it's live."
+          ? "A fresh demo job is being funded on Arc. You'll be able to run a scene here once it's live."
           : "The server may be waking up. Give it a moment and try again."}
       </p>
       <div className="mt-6 flex flex-wrap justify-center gap-3">
@@ -150,7 +220,7 @@ function DemoJob({ data }: { data: DemoData }) {
             <h2 className="mb-2 text-xs text-muted">Decisions</h2>
             {decisions.length === 0 && (
               <p className="border-t border-line py-6 text-sm text-muted">
-                The operator's first run is on its way.
+                No scene has run yet. Use the button above to start one.
               </p>
             )}
             {decisions.map((d) => (

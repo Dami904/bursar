@@ -7,3 +7,4 @@ export * from "./lineage.js";
 export * from "./audit.js";
 export * from "./payout.js";
 export * from "./keys.js";
+export * from "./demo.js";

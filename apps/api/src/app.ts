@@ -9,12 +9,18 @@ import { resolvePrincipal, type Principal } from "./auth/principal.js";
 import {
   authorizations,
   computeMetrics,
+  demoRunState,
   jobs,
   LedgerError,
   operatorRuns,
   owners,
   payees,
+  requestDemoRun,
+  DEMO_SCENES,
   type Db,
+  type DemoRunPlan,
+  type DemoRunReason,
+  type DemoRunState,
 } from "@bursar/db";
 import {
   QuoteError,
@@ -245,6 +251,11 @@ export interface ApiDeps {
    * job still needs its owner's key. It's our own business's job, so its data is ours to show.
    */
   readonly demoJobId?: string | undefined;
+  /**
+   * Lets visitors run the demo job's next scene with a click, under these limits. Omitted: the
+   * demo can't be run from the page (it's read-only, or runs on its own schedule).
+   */
+  readonly demoRun?: DemoRunPlan | undefined;
   /** Whether Bursar's own AI operator runs on this server (a model key, autopilot on). */
   readonly operatorAvailable?: boolean;
   /** The most any one job may have as its budget (mainnet, while it's new). No cap when unset. */
@@ -515,6 +526,68 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
       payees: payeesList,
       anchor: audit.ok ? audit.latestAnchor : null,
     });
+  });
+
+  const DEMO_WHY: Record<DemoRunReason, string> = {
+    NOT_ACTIVE: "The demo job isn't open right now.",
+    PENDING: "A scene is about to start.",
+    BUSY: "A scene is running. Watch the decisions below.",
+    COOLDOWN: "The last scene is still finishing. Give it a few minutes.",
+    DAILY_LIMIT: "Today's scenes have all been run. Try again a little later.",
+    BUDGET_PACE:
+      "The demo's budget is paced to last until 3 November, and today's share is used up. It frees up as the day rolls on.",
+  };
+
+  /** What a visitor sees beside the button: the next scene, and whether it can run now. */
+  function demoRunView(state: DemoRunState, accepted?: boolean) {
+    const v = state.verdict;
+    return {
+      enabled: true,
+      ...(accepted === undefined ? {} : { accepted }),
+      canRun: v.canRun,
+      reason: v.reason,
+      message: v.reason === null ? null : DEMO_WHY[v.reason],
+      retryAfterSeconds: v.retryAfterSeconds,
+      next: {
+        number: state.nextIndex + 1,
+        of: DEMO_SCENES.length,
+        title: state.next.title,
+        maxCost: formatUsdc(state.next.maxCostMicros),
+      },
+      runsToday: state.runsLast24h,
+      maxPerDay: state.maxPerDay,
+      dailyAllowance: formatUsdc(v.allowancePerDay),
+      remaining: formatUsdc(state.remaining),
+    };
+  }
+
+  /** Whether the demo can be run from the page, and what the next scene is. */
+  app.get("/demo/run", async (c) => {
+    const job = await demoJob();
+    if (deps.demoRun === undefined) return c.json({ enabled: false });
+    const state = await demoRunState(db, job.id, deps.demoRun);
+    if (state === null) throw notFound("Demo");
+    return c.json(demoRunView(state));
+  });
+
+  /**
+   * A visitor's click: queue the demo's next scene. The worker picks it up within half a minute.
+   * Refused, with the reason, when it's too soon, the day's scenes are used, or the demo's budget
+   * would run short of lasting until the date it's paced for.
+   */
+  app.post("/demo/run", async (c) => {
+    const job = await demoJob();
+    if (deps.demoRun === undefined) throw notFound("Demo");
+    const { accepted, state } = await requestDemoRun(db, job.id, deps.demoRun);
+    if (state === null) throw notFound("Demo");
+    if (!accepted) {
+      throw new HttpError(
+        409,
+        `DEMO_${state.verdict.reason ?? "NOT_NOW"}`,
+        state.verdict.reason === null ? "Not now." : DEMO_WHY[state.verdict.reason],
+      );
+    }
+    return c.json(demoRunView(state, true), 202);
   });
 
   app.get("/demo/runs/:runId", async (c) => {

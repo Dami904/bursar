@@ -62,7 +62,7 @@ The first line is held by the API under a row lock. The second is held by a smar
 
 ## Judge it in 90 seconds
 
-**Live: [bursarhq.vercel.app](https://bursarhq.vercel.app)**. Everything runs for real on Arc testnet: the site, the API and worker, the database, and a public job that Bursar's own AI operator works on around the clock. Open **[/demo](https://bursarhq.vercel.app/demo)**: every decision links to its Arc transactions, and **Verify** recomputes its audit hashes in your browser.
+**Live: [bursarhq.vercel.app](https://bursarhq.vercel.app)**. Everything runs for real on Arc testnet: the site, the API and worker, the database, and a public job that Bursar's own AI operator works when you press **Run this scene** on the demo page. Open **[/demo](https://bursarhq.vercel.app/demo)**: every decision links to its Arc transactions, and **Verify** recomputes its audit hashes in your browser.
 
 |         |                                                                                                       |
 | ------- | ----------------------------------------------------------------------------------------------------- |
@@ -415,7 +415,7 @@ if (approved) _checkApproval(jobId, opId, to, amount, job.policyVersion, approva
 
 ## What's scripted vs. real
 
-- **The demo job's briefs are scripted.** Every 3 hours the next of five scenes is set (a script line, a stock image, a market report, an invoice, a helper with too small a limit), so the public feed shows every kind of decision. What the operator does with each brief is its own choice, made live.
+- **The demo job's briefs are scripted.** Each click on the demo page sets the next of six scenes (a script line, a stock image, a market report, an invoice, a helper with too small a limit, and sound and captions through Gateway), so the public feed shows every kind of decision. Runs are paced: a few minutes apart, a few a day, and the budget is spread to last until 3 November. What the operator does with each brief is its own choice, made live.
 - **The demo's larger payments are approved automatically** by a demo approver after a minute, so the feed shows approvals without someone on call. That wallet is an approver on the demo job only, in the vault itself.
 - **The seller, [Scenestock](https://scenestock.vercel.app), is ours.** It's a real x402 service settled by Circle's facilitator on Arc; other sellers are added the same way.
 - **Everything else is real**: decisions, reservations, vault releases, x402 payments, refunds and anchors are Arc testnet transactions you can open on the explorer.

@@ -42,6 +42,16 @@ const env = z
     PUBLIC_JOB_ID: z.string().uuid().optional(),
     /** The job shown read-only at /demo. */
     DEMO_JOB_ID: z.string().uuid().optional(),
+    /** "on-demand" (default): visitors run the demo's scenes with a click. "auto": it runs on a timer, no button. */
+    DEMO_MODE: z.enum(["on-demand", "auto"]).default("on-demand"),
+    /** Demo pacing: the least time between scenes, the most per 24 hours, and when the budget must last until. */
+    DEMO_COOLDOWN_MS: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .default(5 * 60_000),
+    DEMO_MAX_RUNS_PER_DAY: z.coerce.number().int().min(1).default(10),
+    DEMO_LASTS_UNTIL: z.coerce.date().default(new Date("2026-11-03T00:00:00Z")),
   })
   .parse(process.env);
 
@@ -66,6 +76,18 @@ const app = createApp(db, {
   webOrigins: webOrigins,
   telegramBot: env.TELEGRAM_BOT_USERNAME,
   demoJobId: env.PUBLIC_JOB_ID ?? env.DEMO_JOB_ID,
+  // The click-to-run button belongs to the demo job that the worker automates, not a plain public job.
+  demoRun:
+    env.DEMO_JOB_ID !== undefined &&
+    env.PUBLIC_JOB_ID === undefined &&
+    env.DEMO_MODE === "on-demand"
+      ? {
+          cooldownMs: env.DEMO_COOLDOWN_MS,
+          maxPerDay: env.DEMO_MAX_RUNS_PER_DAY,
+          lastsUntil: env.DEMO_LASTS_UNTIL,
+          reserveMicros: 100_000n,
+        }
+      : undefined,
   // The worker runs the operator with a model key unless AUTOPILOT=false (same process).
   operatorAvailable:
     process.env.AUTOPILOT !== "false" &&

@@ -35,6 +35,11 @@ const schema = z.object({
   AUTOPILOT: z.enum(["true", "false"]).default("true"),
   /** The public demo job: its brief rotates, and its approvals are signed by a demo approver. */
   DEMO_JOB_ID: z.string().uuid().optional(),
+  /**
+   * "on-demand" (the default): the demo job runs a scene only when a visitor clicks "Run a scene".
+   * "auto": the old behaviour, the next scene every DEMO_INTERVAL_MS, spending whether or not anyone is looking.
+   */
+  DEMO_MODE: z.enum(["on-demand", "auto"]).default("on-demand"),
   DEMO_INTERVAL_MS: z.coerce
     .number()
     .int()
