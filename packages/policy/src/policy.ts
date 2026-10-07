@@ -39,7 +39,7 @@ export interface PolicyJob {
   readonly perTxCap: bigint;
   /** Amounts strictly above this need a human approval. */
   readonly approvalThreshold: bigint;
-  /** Max committed per rolling window. */
+  /** Max committed per spending window. */
   readonly windowCap: bigint;
   readonly windowSeconds: number;
   readonly windowStart: Date;
@@ -108,7 +108,7 @@ export type PolicyOutcome =
       readonly checks: readonly CheckResult[];
     };
 
-/** The rolling window as it stands at `now`: it resets once `windowSeconds` have passed. */
+/** The spending window as it stands at `now`: a fixed window that starts again once `windowSeconds` have passed. */
 export function currentWindow(
   job: Pick<PolicyJob, "windowSeconds" | "windowStart" | "windowSpent">,
   now: Date,

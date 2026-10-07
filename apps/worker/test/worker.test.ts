@@ -7,6 +7,7 @@ import {
   gatewayWithdrawals,
   decisions,
   jobs,
+  owners,
   verifyChain,
   type Db,
 } from "@bursar/db";
@@ -229,6 +230,79 @@ describe("indexer", () => {
     await db.execute(sql`DELETE FROM chain_cursors`); // re-read every block from scratch
     await index();
     expect((await jobRow(job.id)).deposited).toBe(parseUsdc("1.00"));
+  });
+});
+
+describe("a vault job id created by someone else", () => {
+  /** A Bursar job for an owner who signed in with `wallet`, whose vault job the dev chain's owner account creates. */
+  async function createdOnChain(wallet: string | null) {
+    const { owner } = await createOwner(db, "Studio");
+    if (wallet !== null)
+      await db.update(owners).set({ walletAddress: wallet }).where(eq(owners.id, owner.id));
+    const job = await createJob(
+      db,
+      owner.id,
+      {
+        title: "Squat test",
+        customer: "Test",
+        budget: parseUsdc("1.00"),
+        perTxCap: parseUsdc("0.50"),
+        approvalThreshold: parseUsdc("0.50"),
+        windowCap: parseUsdc("1.00"),
+        windowSeconds: 3600,
+        expiresAt: new Date(Date.now() + 86_400_000),
+        delegationAllowed: true,
+      },
+      deps.wallets,
+    );
+    await openVaultJob(chain, job.vaultJobId as Hex, {
+      budget: parseUsdc("1.00"),
+      perTxCap: parseUsdc("0.50"),
+      threshold: parseUsdc("0.50"),
+      fund: parseUsdc("1.00"),
+    });
+    await index();
+    return jobRow(job.id);
+  }
+
+  it("is not opened, and isn't given to the creator, when the owner signed in with another wallet", async () => {
+    const row = await createdOnChain(accounts.seller.address); // not the account that created it
+    expect(row.status).not.toBe("ACTIVE");
+    expect(row.ownerWallet).toBeNull();
+    expect(row.frozenReason).toContain(accounts.owner.address.toLowerCase());
+    expect(row.frozenReason).toContain(accounts.seller.address.toLowerCase());
+  });
+
+  it("opens normally when the creator is the wallet the owner signed in with", async () => {
+    const row = await createdOnChain(accounts.owner.address);
+    expect(row.status).toBe("ACTIVE");
+    expect(row.frozenReason).toBeNull();
+    expect(row.ownerWallet).toBe(accounts.owner.address.toLowerCase());
+  });
+
+  it("still opens for an owner with no wallet on record (an API key), whose wallet it then learns", async () => {
+    const row = await createdOnChain(null);
+    expect(row.status).toBe("ACTIVE");
+    expect(row.ownerWallet).toBe(accounts.owner.address.toLowerCase());
+  });
+
+  it("stays unopened when the other wallet unpauses the vault job after the worker paused it", async () => {
+    const row = await createdOnChain(accounts.seller.address);
+    await reconcile(); // the worker pauses the squatted vault job
+    await index();
+    const squatter = chain.wallet(accounts.owner);
+    const hash = await squatter.writeContract({
+      address: chain.vault,
+      abi: jobVaultAbi,
+      functionName: "unpause",
+      args: [row.vaultJobId as Hex],
+    });
+    await chain.client.waitForTransactionReceipt({ hash });
+    await index();
+    const after = await jobRow(row.id);
+    expect(after.status).not.toBe("ACTIVE");
+    expect(after.status).toBe(row.status);
+    expect(after.frozenReason).not.toBeNull();
   });
 });
 

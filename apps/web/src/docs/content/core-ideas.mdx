@@ -11,7 +11,7 @@ A job has these rules. The owner sets them when the job is created, and only the
 | **Budget** | The most the job can ever spend, in USDC. Every agent on the job shares it. |
 | **Per-payment cap** | The largest single payment allowed. |
 | **Approval threshold** | Payments strictly above this wait for a human signature. |
-| **Spending window** | At most a set amount per rolling period (an hour by default), so even a runaway agent spends slowly. |
+| **Spending window** | At most a set amount per window (an hour by default; the count starts again when a window ends), so even a runaway agent spends slowly. |
 | **Expiry** | After this moment the job pays no one. |
 | **Payees** | The allow-list: who the job may pay. Everyone else is refused. |
 | **Categories** (optional) | Labels on payees (say `images` or `contractors`) with their own smaller budgets. |

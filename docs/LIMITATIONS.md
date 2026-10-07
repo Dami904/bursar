@@ -8,6 +8,17 @@ What Bursar does **not** do yet, stated plainly. Updated as the build progresses
 - **The demo's approvals are automatic.** A demo approver (a key the server holds, allowed only on the demo job in the vault) signs the demo job's payments after a minute, so the public feed shows approvals without a person on call. Real jobs are never approved this way.
 - **The demo's story repeats.** It runs only when a visitor clicks, one scene at a time through six scenes, paced so the budget lasts; the operator gets a summary of earlier runs so it doesn't buy the same thing twice in a row.
 
+## Contracts (reviewed 7 October 2026)
+
+The vault contracts were reviewed by Arc Studio; each finding and what was done about it is in [AUDIT-2026-10-07.md](AUDIT-2026-10-07.md). What matters when relying on them:
+
+- **The spending window is a fixed one, not a sliding one.** It starts again when it ends, so across a boundary a job can spend up to twice its window cap in a short time (the whole cap just before the window ends, and again just after). The budget, per-payment cap and approval threshold still bound the total, and the owner can pause.
+- **A refunded payment still counts against its window.** The vault doesn't record which window a release belonged to, and lowering the current window for an old refund would let a later window spend past its cap. The cost is conservative: a failed payment holds back its amount until the window ends.
+- **A refund that arrives after a job was closed goes to the owner.** (Fixed in the source on 7 October; the vaults deployed before that still credit it to the closed job, where it can't be withdrawn. Bursar blocks Close while a payment is held or stuck, which keeps that from happening in normal use.)
+- **A vault job id belongs to whoever creates it first.** Ids are random and only appear in the owner's own transaction, and Bursar opens a job only when the wallet that created it is the one its owner signed in with; a mismatch freezes the job. Binding ids to their creator on-chain needs a new vault.
+- **The operator key can't be rotated.** It is fixed when a vault is deployed and can only release inside each owner's rules; the owner's `pause` works without it.
+- **An approval threshold of zero means every release needs approval.** To need none, set it very high.
+
 ## Day 9
 
 - **Automatic runs depend on the model being available.** If Gemini is overloaded when a run starts, Bursar tries the fallback model, then retries the run with backoff (2 minutes, doubling to 30, five tries). A job whose runs keep failing waits for the owner's "Run now".

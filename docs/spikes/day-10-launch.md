@@ -7,17 +7,17 @@ the API and worker at `bursarhq-api.onrender.com`, the demo seller at
 
 ## What's live
 
-| Piece           | Where                                                                                               | Runs on                |
-| --------------- | --------------------------------------------------------------------------------------------------- | ---------------------- |
-| Landing page    | [`/`](https://bursarhq.vercel.app)                                                                  | Vercel (`bursarhq`)    |
-| Public demo job | [`/demo`](https://bursarhq.vercel.app/demo), evidence at `/demo/decisions/:id`                      | Vercel + Render        |
-| Docs            | [`/docs`](https://bursarhq.vercel.app/docs/introduction), `/llms.txt`, `/docs/<page>.md`            | Vercel                 |
-| Console         | [`/login`](https://bursarhq.vercel.app/login) → `/app`                                              | Vercel + Render        |
-| API + worker    | `https://bursarhq-api.onrender.com`, one Node process (`scripts/start-production.mjs`)              | Render (free, Ohio)    |
-| Database        | Postgres 17, all 11 migrations                                                                      | Neon                   |
-| Demo seller     | [scenestock.vercel.app](https://scenestock.vercel.app) (x402, Circle facilitator)                   | Vercel (`scenestock`)  |
-| MCP server      | `npx -y bursar-mcp` (0.1.1)                                                                         | npm                    |
-| Audit anchor    | [`0xCe76…8ac4`](https://explorer.testnet.arc.io/address/0xCe76d1DAcbECd7dc4f6D881D673b981EdEE58ac4) | Arc testnet (verified) |
+| Piece           | Where                                                                                               | Runs on                                                            |
+| --------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Landing page    | [`/`](https://bursarhq.vercel.app)                                                                  | Vercel (`bursarhq`)                                                |
+| Public demo job | [`/demo`](https://bursarhq.vercel.app/demo), evidence at `/demo/decisions/:id`                      | Vercel + Render                                                    |
+| Docs            | [`/docs`](https://bursarhq.vercel.app/docs/introduction), `/llms.txt`, `/docs/<page>.md`            | Vercel                                                             |
+| Console         | [`/login`](https://bursarhq.vercel.app/login) → `/app`                                              | Vercel + Render                                                    |
+| API + worker    | `https://bursarhq-api.onrender.com`, one Node process (`scripts/start-production.mjs`)              | Render (free, Ohio)                                                |
+| Database        | Postgres 17, all 11 migrations                                                                      | Neon                                                               |
+| Demo seller     | [scenestock.vercel.app](https://scenestock.vercel.app) (x402, Circle facilitator)                   | Vercel (`scenestock`)                                              |
+| MCP server      | `npx -y bursar-mcp` (0.1.1)                                                                         | npm                                                                |
+| Audit anchor    | [`0xCe76…8ac4`](https://explorer.testnet.arc.io/address/0xCe76d1DAcbECd7dc4f6D881D673b981EdEE58ac4) | Arc testnet (verified; replaced on 7 Oct, see contracts/README.md) |
 
 ## Proven
 

@@ -31,6 +31,8 @@ export async function createJob(
   wallets?: WalletProvider,
 ) {
   if (input.perTxCap > input.budget) throw badRequest("perTxCap can't exceed the budget");
+  // The vault refuses this too; saying so here saves the owner a failed transaction.
+  if (input.windowCap < input.perTxCap) throw badRequest("windowCap can't be below perTxCap");
   if (input.expiresAt.getTime() <= Date.now()) throw badRequest("expiresAt must be in the future");
   const id = randomUUID();
   const wallet =

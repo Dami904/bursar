@@ -38,7 +38,14 @@ import {
   type CatalogEntry,
   type WalletProvider,
 } from "@bursar/payments";
-import { HttpError, badRequest, forbidden, notFound, unauthorized } from "./http/errors.js";
+import {
+  HttpError,
+  badRequest,
+  conflict,
+  forbidden,
+  notFound,
+  unauthorized,
+} from "./http/errors.js";
 import {
   DEFAULT_RATE_LIMITS,
   RateLimitedError,
@@ -822,6 +829,14 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
   app.post("/jobs/:id/unfreeze", async (c) => {
     const owner = require(c, "OWNER");
     const job = await getOwnedJob(db, owner.ownerId, c.req.param("id"));
+    // A job that never opened on-chain (its vault id was taken by another wallet) stays frozen:
+    // unfreezing it would let the owner fund a vault job someone else controls.
+    if (job.status === "DRAFT" || job.status === "PENDING_CHAIN") {
+      throw conflict(
+        "NEVER_OPENED",
+        "This job was never opened in the vault by your wallet, so it can't be unfrozen. Create the job again.",
+      );
+    }
     const [updated] = await db
       .update(jobs)
       .set({ frozenReason: null })

@@ -5,6 +5,7 @@ import {
   committedOf,
   gatewayFloats,
   jobs,
+  owners,
   type Db,
   type Tx,
 } from "@bursar/db";
@@ -103,7 +104,30 @@ async function applyLog(tx: Tx, entry: Log, maxJobBudget?: bigint): Promise<void
     version === null ? {} : { policyVersion: sql`greatest(${jobs.policyVersion}, ${version})` };
 
   switch (decoded.eventName) {
-    case "JobCreated":
+    case "JobCreated": {
+      // The vault gives a job id to whoever creates it first. If the owner signed in with a wallet
+      // and someone else created this job, don't adopt their wallet as the owner or open the job:
+      // freeze it, so the worker pauses it on-chain and the owner is told to start again.
+      const [signedInOwner] = await tx
+        .select({ wallet: owners.walletAddress })
+        .from(owners)
+        .where(eq(owners.id, job.ownerId));
+      const creator = String(args.owner).toLowerCase();
+      if (signedInOwner?.wallet != null && signedInOwner.wallet.toLowerCase() !== creator) {
+        await tx
+          .update(jobs)
+          .set({
+            frozenReason: `This job's vault id was created on-chain by ${creator}, not by your wallet (${signedInOwner.wallet.toLowerCase()}). It was not opened. Create the job again.`,
+          })
+          .where(eq(jobs.id, job.id));
+        log.error("vault job id created by another wallet", undefined, {
+          jobId: job.id,
+          expected: signedInOwner.wallet.toLowerCase(),
+          creator,
+          alert: true,
+        });
+        break;
+      }
       await tx
         .update(jobs)
         .set({
@@ -117,6 +141,7 @@ async function applyLog(tx: Tx, entry: Log, maxJobBudget?: bigint): Promise<void
         .where(and(eq(jobs.id, job.id), inArray(jobs.status, ["DRAFT", "PENDING_CHAIN"])));
       log.info("job live on-chain", { jobId: job.id, vaultJobId });
       break;
+    }
     case "Funded": {
       // The owner funds the budget; anyone else paying in is a customer paying revenue.
       const amount = args.amount as bigint;
@@ -176,6 +201,9 @@ async function applyLog(tx: Tx, entry: Log, maxJobBudget?: bigint): Promise<void
         .where(eq(jobs.id, job.id));
       break;
     case "StatusChanged": {
+      // A job that never opened (its vault id was taken by another wallet) stays unopened, whatever
+      // that wallet does with the vault job.
+      if (job.status === "DRAFT" || job.status === "PENDING_CHAIN") break;
       const status = vaultStatus[Number(args.status) as keyof typeof vaultStatus];
       const mapped = status === "ACTIVE" ? "ACTIVE" : status === "PAUSED" ? "PAUSED" : "CLOSED";
       await tx

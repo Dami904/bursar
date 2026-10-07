@@ -16,6 +16,15 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 /// @dev Checks in `release` run in the same order as the off-chain policy engine
 ///      (packages/policy); shared vectors keep the two in step. Amounts are USDC base units
 ///      (6 decimals, ERC-20 interface). See PLAN.md §8.1.
+///
+///      The spending window is a fixed window that starts at the first release after the last one
+///      ended, not a sliding one. Across a boundary a job can therefore release up to 2x `windowCap`
+///      in a short time (the cap's full amount just before the window ends and again just after);
+///      `budget`, `perTxCap` and `approvalThreshold` still bound the total, and the owner can pause.
+///
+///      The operator is immutable on purpose: it keeps the trust model to one key that can only
+///      release inside each owner's rules. A leaked operator key is contained by those rules and by
+///      the owner's own `pause`; replacing it means deploying a new vault (see docs/LIMITATIONS.md).
 contract JobVault is EIP712, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -70,6 +79,8 @@ contract JobVault is EIP712, ReentrancyGuard {
     address public immutable operator;
 
     /// @notice USDC this contract owes to jobs. The token balance is always at least this.
+    /// @dev A uint256 while each job's fields are uint128: the sum over every job can exceed one
+    ///      job's range, and uint128 is itself ~3.4e14 USDC, far beyond any supply.
     uint256 public accounted;
 
     mapping(bytes32 jobId => Job) internal _jobs;
@@ -99,6 +110,7 @@ contract JobVault is EIP712, ReentrancyGuard {
 
     error NotOperator();
     error NotOwner();
+    error NotAuthorized();
     error JobExists();
     error InvalidParams();
     error JobNotActive();
@@ -138,6 +150,9 @@ contract JobVault is EIP712, ReentrancyGuard {
     // ------------------------------------------------------------------ owner: lifecycle
 
     /// @notice Creates a job owned by the caller. The job starts Active with policyVersion 1.
+    /// @dev `agentWallet` is fixed for the life of the job: a job whose agent wallet has to change
+    ///      is closed (the owner gets the unspent USDC back) and opened again. The job id is
+    ///      first come, first served, so ids should be unguessable until the transaction is mined.
     function createJob(bytes32 jobId, JobParams calldata p) external {
         if (_jobs[jobId].status != Status.None) revert JobExists();
         _validate(p.budget, p.perTxCap, p.windowCap, p.window);
@@ -165,6 +180,9 @@ contract JobVault is EIP712, ReentrancyGuard {
 
     /// @notice Funds in one transaction using an EIP-2612 permit. A permit that was front-run is
     ///         ignored as long as the allowance is already in place.
+    /// @dev A failed permit is swallowed on purpose (anyone can burn a permit's nonce by submitting
+    ///      it first). If the allowance isn't there either, the transfer below reverts with the
+    ///      token's own allowance error. The caller must be sure of an allowance of at least `amount`.
     function fundWithPermit(bytes32 jobId, uint128 amount, uint256 deadline, uint8 v, bytes32 r, bytes32 s)
         external
         nonReentrant
@@ -183,6 +201,8 @@ contract JobVault is EIP712, ReentrancyGuard {
         emit BudgetChanged(jobId, budget, ++job.policyVersion);
     }
 
+    /// @param approvalThreshold Releases above this need an approver's signature. Zero is a valid
+    ///        setting meaning "approve every release"; use a very large value to need none.
     function setLimits(bytes32 jobId, uint128 perTxCap, uint128 approvalThreshold, uint128 windowCap, uint64 window)
         external
         onlyOwner(jobId)
@@ -217,7 +237,7 @@ contract JobVault is EIP712, ReentrancyGuard {
     /// @notice Stops all releases. The owner or, in an emergency, the operator can pause.
     function pause(bytes32 jobId) external {
         Job storage job = _jobs[jobId];
-        if (msg.sender != job.owner && msg.sender != operator) revert NotOwner();
+        if (msg.sender != job.owner && msg.sender != operator) revert NotAuthorized();
         if (job.status != Status.Active) revert JobNotActive();
         job.status = Status.Paused;
         emit StatusChanged(jobId, Status.Paused, ++job.policyVersion);
@@ -294,7 +314,15 @@ contract JobVault is EIP712, ReentrancyGuard {
     /// @notice Credits a job back for money that returned to the vault after a failed payment
     ///         (the agent wallet sends it back first). Each operation refunds at most once and
     ///         never more than it released; the USDC must already be here.
-    function refund(bytes32 jobId, bytes32 opId, uint128 amount) external onlyOperator {
+    /// @dev If the job was closed in the meantime, its owner has already taken everything out, so
+    ///      the returned money goes straight to the owner instead of being credited to a job that
+    ///      can no longer pay it out.
+    ///
+    ///      The window's running total is not reduced by a refund. The release may have been in an
+    ///      earlier window, and the vault doesn't record which: lowering the current window's total
+    ///      by an old refund would let a later window spend past its cap. The cost is conservative
+    ///      (a refunded payment still counts against its window until the window ends).
+    function refund(bytes32 jobId, bytes32 opId, uint128 amount) external nonReentrant onlyOperator {
         Job storage job = _jobs[jobId];
         uint128 released = releasedFor[jobId][opId];
         if (released == 0) revert NotReleased();
@@ -304,8 +332,15 @@ contract JobVault is EIP712, ReentrancyGuard {
         if (usdc.balanceOf(address(this)) < accounted + amount) revert RefundNotReceived();
         refunded[jobId][opId] = true;
         job.spent -= amount;
-        accounted += amount;
         emit Refunded(jobId, opId, amount);
+        if (job.status == Status.Closed) {
+            // Closed: the owner already withdrew the job's balance, so pay this to them directly.
+            job.withdrawn += amount;
+            emit Withdrawn(jobId, job.owner, amount);
+            usdc.safeTransfer(job.owner, amount);
+        } else {
+            accounted += amount;
+        }
     }
 
     // ------------------------------------------------------------------ views
@@ -356,7 +391,8 @@ contract JobVault is EIP712, ReentrancyGuard {
     }
 
     function _validate(uint128 budget, uint128 perTxCap, uint128 windowCap, uint64 window) private pure {
-        if (budget == 0 || perTxCap == 0 || perTxCap > budget || windowCap == 0 || window == 0) {
+        // A window cap below the per-payment cap would refuse some or all payments for no reason.
+        if (budget == 0 || perTxCap == 0 || perTxCap > budget || windowCap < perTxCap || window == 0) {
             revert InvalidParams();
         }
     }

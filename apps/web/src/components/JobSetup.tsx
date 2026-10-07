@@ -333,7 +333,15 @@ export function FinishSetup({ job }: { job: Job }) {
     },
   });
 
-  if (vaultJobId === null || job.status === "CLOSED" || missing <= 0n) return null;
+  // Never offer a deposit into a frozen job: it may be a vault job someone else controls.
+  if (
+    vaultJobId === null ||
+    job.status === "CLOSED" ||
+    job.frozenReason !== null ||
+    missing <= 0n
+  ) {
+    return null;
+  }
   return (
     <Card>
       <p className="font-medium">Finish setting up this job</p>

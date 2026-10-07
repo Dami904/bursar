@@ -32,6 +32,11 @@ contract JobVaultTest is BaseTest {
         vault.createJob(JOB, p);
 
         p = _params();
+        p.windowCap = p.perTxCap - 1; // a window that couldn't fit one payment
+        vm.expectRevert(JobVault.InvalidParams.selector);
+        vault.createJob(JOB, p);
+
+        p = _params();
         p.expiry = uint64(block.timestamp);
         vm.expectRevert(JobVault.InvalidParams.selector);
         vault.createJob(JOB, p);
@@ -179,7 +184,7 @@ contract JobVaultTest is BaseTest {
     function test_release_rateLimitedWithinWindow_thenResets() public {
         _openJob();
         vm.prank(owner);
-        vault.setLimits(JOB, PER_TX, BUDGET, 300_000, WINDOW);
+        vault.setLimits(JOB, 300_000, BUDGET, 300_000, WINDOW);
         _release("op-1", payee, 200_000);
         uint64 version = _version();
         vm.prank(operator);
@@ -189,6 +194,43 @@ contract JobVaultTest is BaseTest {
         vm.warp(block.timestamp + WINDOW);
         _release("op-2", payee, 100_001);
         assertEq(vault.getJob(JOB).windowSpent, 100_001);
+    }
+
+    /// The window is a fixed one: just before it ends a job can use its whole cap, and again just
+    /// after. Documented in the contract; the budget and per-payment cap still bound the total.
+    function test_release_fixedWindowAllowsTwiceTheCapAcrossABoundary() public {
+        _openJob();
+        vm.prank(owner);
+        vault.setLimits(JOB, 300_000, BUDGET, 300_000, WINDOW);
+        uint64 windowEnds = vault.getJob(JOB).windowStart + WINDOW;
+        vm.warp(windowEnds - 1);
+        _release("op-1", payee, 300_000);
+        uint64 version = _version();
+        vm.prank(operator);
+        vm.expectRevert(JobVault.RateLimited.selector);
+        vault.release(JOB, "op-2", payee, 1, version, _noApproval());
+        vm.warp(windowEnds);
+        _release("op-2", payee, 300_000);
+        assertEq(vault.getJob(JOB).spent, 600_000);
+        assertEq(vault.getJob(JOB).windowSpent, 300_000);
+    }
+
+    /// An approval threshold of zero means every release needs an approver, not none.
+    function test_release_thresholdZeroNeedsAnApprovalForEveryRelease() public {
+        _openJob();
+        vm.prank(owner);
+        vault.setLimits(JOB, PER_TX, 0, WINDOW_CAP, WINDOW);
+        uint64 version = _version();
+        vm.prank(operator);
+        vm.expectRevert(JobVault.ApprovalRequired.selector);
+        vault.release(JOB, "op-1", payee, 1, version, _noApproval());
+    }
+
+    function test_setLimits_rejectsAWindowCapBelowThePerPaymentCap() public {
+        _openJob();
+        vm.prank(owner);
+        vm.expectRevert(JobVault.InvalidParams.selector);
+        vault.setLimits(JOB, 300_000, THRESHOLD, 299_999, WINDOW);
     }
 
     function test_release_operationIdIsSingleUse() public {
@@ -387,7 +429,7 @@ contract JobVaultTest is BaseTest {
     function test_pause_strangerCantPause() public {
         _openJob();
         vm.prank(stranger);
-        vm.expectRevert(JobVault.NotOwner.selector);
+        vm.expectRevert(JobVault.NotAuthorized.selector);
         vault.pause(JOB);
     }
 
@@ -423,6 +465,60 @@ contract JobVaultTest is BaseTest {
         vault.refund(JOB, "op-1", 200_000);
         assertEq(vault.getJob(JOB).spent, 0);
         assertEq(vault.available(JOB), BUDGET);
+    }
+
+    /// A refund that arrives after the owner closed the job goes to the owner, not into a balance
+    /// nobody can withdraw.
+    function test_refund_afterCloseGoesStraightToTheOwner() public {
+        _openJob();
+        _release("op-1", agentWallet, 200_000);
+        vm.prank(owner);
+        vault.closeJob(JOB); // takes the 800_000 that was left
+        uint256 ownerBefore = usdc.balanceOf(owner);
+
+        vm.prank(agentWallet);
+        usdc.transfer(address(vault), 200_000); // the failed payment's money comes back late
+        vm.expectEmit(address(vault));
+        emit JobVault.Refunded(JOB, "op-1", 200_000);
+        vm.expectEmit(address(vault));
+        emit JobVault.Withdrawn(JOB, owner, 200_000);
+        vm.prank(operator);
+        vault.refund(JOB, "op-1", 200_000);
+
+        assertEq(usdc.balanceOf(owner), ownerBefore + 200_000);
+        assertEq(usdc.balanceOf(address(vault)), 0);
+        assertEq(vault.accounted(), 0);
+        assertEq(vault.available(JOB), 0);
+        JobVault.Job memory job = vault.getJob(JOB);
+        assertEq(job.spent, 0);
+        assertEq(job.withdrawn, BUDGET);
+        // Still only once.
+        vm.prank(operator);
+        vm.expectRevert(JobVault.AlreadyRefunded.selector);
+        vault.refund(JOB, "op-1", 1);
+    }
+
+    function test_refund_afterCloseStillNeedsTheMoneyToHaveArrived() public {
+        _openJob();
+        _release("op-1", agentWallet, 200_000);
+        vm.prank(owner);
+        vault.closeJob(JOB);
+        vm.prank(operator);
+        vm.expectRevert(JobVault.RefundNotReceived.selector);
+        vault.refund(JOB, "op-1", 200_000);
+    }
+
+    /// A refund doesn't lower the window's running total: the release may have been in an earlier
+    /// window, and lowering this one's total for it would let a later window spend past its cap.
+    function test_refund_doesntLowerTheWindowTotal() public {
+        _openJob();
+        _release("op-1", agentWallet, 200_000);
+        vm.prank(agentWallet);
+        usdc.transfer(address(vault), 200_000);
+        vm.prank(operator);
+        vault.refund(JOB, "op-1", 200_000);
+        assertEq(vault.getJob(JOB).spent, 0);
+        assertEq(vault.getJob(JOB).windowSpent, 200_000);
     }
 
     function test_refund_requiresTheMoneyToHaveArrived() public {

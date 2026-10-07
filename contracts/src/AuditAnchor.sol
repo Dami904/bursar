@@ -14,6 +14,8 @@ contract AuditAnchor {
     }
 
     address public immutable operator;
+    /// @dev A uint64 that moves up by one per anchor: it can't realistically overflow (one anchor a
+    ///      second would take ~585 billion years).
     uint64 public latestSeq;
     mapping(uint64 seq => Anchor) public anchors;
 
@@ -29,7 +31,9 @@ contract AuditAnchor {
     }
 
     /// @param seq Must be exactly latestSeq + 1: anchors can't be skipped, replaced or replayed.
-    /// @param decisions Total decisions covered by `head`; never decreases.
+    /// @param decisions How many entries of the log `head` covers; never decreases. Bursar passes the
+    ///        log's entry count and anchors only when it has grown, so equal counts don't arise in
+    ///        practice; they are allowed so that an operator can't be locked out by a repeat.
     function anchor(bytes32 head, uint64 seq, uint64 decisions) external {
         if (msg.sender != operator) revert NotOperator();
         if (seq != latestSeq + 1) revert BadSequence(latestSeq + 1, seq);

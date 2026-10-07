@@ -67,7 +67,8 @@ export function JobMenu({ job }: { job: Job }) {
   const act = useMutation({ mutationFn: vault.send, onSuccess: () => setOpen(false) });
   const inFlight = Number(job.reserved) + Number(job.pendingApproval) + Number(job.unresolved) > 0;
 
-  if (vault.closed) return null;
+  // Not open in the vault yet (or never opened by the owner's wallet): nothing to pause or close.
+  if (vault.closed || job.status === "DRAFT" || job.status === "PENDING_CHAIN") return null;
   return (
     <div className="relative">
       <button
@@ -154,6 +155,15 @@ export function JobStatusCard({ job }: { job: Job }) {
     );
   }
   if (job.frozenReason !== null) {
+    // Never opened in the vault by the owner's wallet: there's nothing to unfreeze.
+    if (job.status === "DRAFT" || job.status === "PENDING_CHAIN") {
+      return (
+        <Card className="mb-6 border-blocked text-sm">
+          <p className="font-medium text-blocked">Not opened</p>
+          <p className="mt-1 text-muted">{job.frozenReason}</p>
+        </Card>
+      );
+    }
     return (
       <Card className="mb-6 border-blocked text-sm">
         <p className="font-medium text-blocked">Frozen</p>

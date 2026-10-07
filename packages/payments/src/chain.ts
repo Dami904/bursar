@@ -49,6 +49,7 @@ export const jobVaultAbi = parseAbi([
   "event Withdrawn(bytes32 indexed jobId, address indexed to, uint256 amount)",
   "error NotOperator()",
   "error NotOwner()",
+  "error NotAuthorized()",
   "error JobExists()",
   "error InvalidParams()",
   "error JobNotActive()",

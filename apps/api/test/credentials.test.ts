@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
-import { decisions } from "@bursar/db";
+import { decisions, jobs } from "@bursar/db";
 import { createOwner } from "../src/services/owners.js";
 import { SELLER, call, db, seedJob } from "./support.js";
 
@@ -111,6 +111,54 @@ describe("owners only see their own jobs (G4)", () => {
     expect((await call("POST", `/agents/${agents[0]!.agent.id}/revoke`, otherKey)).status).toBe(
       404,
     );
+  });
+});
+
+describe("job limits that can't work", () => {
+  const body = (over: Record<string, string>) => ({
+    title: "Film",
+    customer: "Acme",
+    budget: "5.00",
+    perTxCap: "1.00",
+    approvalThreshold: "0.50",
+    windowCap: "2.00",
+    expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+    ...over,
+  });
+
+  it("refuses a window cap below the per-payment cap, which could never fit a payment", async () => {
+    const { key } = await createOwner(db, "Fresh Studio");
+    const refused = await call("POST", "/jobs", key, body({ windowCap: "0.50" }));
+    expect(refused.status).toBe(400);
+    expect(JSON.stringify(refused.body)).toContain("windowCap can't be below perTxCap");
+    // Equal is fine.
+    expect((await call("POST", "/jobs", key, body({ windowCap: "1.00" }))).status).toBe(201);
+  });
+});
+
+describe("unfreezing", () => {
+  it("refuses a job that never opened in the vault (its id taken by another wallet)", async () => {
+    const { job, ownerKey } = await seedJob();
+    await db
+      .update(jobs)
+      .set({ status: "PENDING_CHAIN", frozenReason: "created on-chain by another wallet" })
+      .where(eq(jobs.id, job.id));
+    const refused = await call("POST", `/jobs/${job.id}/unfreeze`, ownerKey);
+    expect(refused.status).toBe(409);
+    expect(JSON.stringify(refused.body)).toContain("NEVER_OPENED");
+    const [still] = await db.select().from(jobs).where(eq(jobs.id, job.id));
+    expect(still?.frozenReason).not.toBeNull();
+  });
+
+  it("lifts the freeze on an open job", async () => {
+    const { job, ownerKey } = await seedJob();
+    await db
+      .update(jobs)
+      .set({ status: "ACTIVE", frozenReason: "unexplained payout" })
+      .where(eq(jobs.id, job.id));
+    expect((await call("POST", `/jobs/${job.id}/unfreeze`, ownerKey)).status).toBe(200);
+    const [after] = await db.select().from(jobs).where(eq(jobs.id, job.id));
+    expect(after?.frozenReason).toBeNull();
   });
 });
 

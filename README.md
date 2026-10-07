@@ -248,14 +248,14 @@ flowchart TD
   W -- "reads events" --> V
 ```
 
-| Layer                     | Owns                                                                                                                                                                           |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Bursar** (API + worker) | Keys, policy, reservations, approvals, delegation, idempotency, revocation, reconciliation, alerts, the audit log                                                              |
-| **JobVault** (Arc)        | The job's USDC and its envelope: budget, deposits, per-payment cap, payees, rolling window, expiry, approvals, once-only operation ids. Only the owner's wallet can change it. |
-| **Circle wallet**         | One per job, funded with exactly one payment at a time; signs the x402 payment                                                                                                 |
-| **x402**                  | The pay-per-request handshake with sellers                                                                                                                                     |
-| **Circle Gateway**        | Sub-cent purchases (Nanopayments): a small float from the vault, then one gasless signature per purchase, settled on Arc in batches                                            |
-| **Arc**                   | Settlement, and the receipts and events Bursar checks before it calls anything settled                                                                                         |
+| Layer                     | Owns                                                                                                                                                                            |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Bursar** (API + worker) | Keys, policy, reservations, approvals, delegation, idempotency, revocation, reconciliation, alerts, the audit log                                                               |
+| **JobVault** (Arc)        | The job's USDC and its envelope: budget, deposits, per-payment cap, payees, spending window, expiry, approvals, once-only operation ids. Only the owner's wallet can change it. |
+| **Circle wallet**         | One per job, funded with exactly one payment at a time; signs the x402 payment                                                                                                  |
+| **x402**                  | The pay-per-request handshake with sellers                                                                                                                                      |
+| **Circle Gateway**        | Sub-cent purchases (Nanopayments): a small float from the vault, then one gasless signature per purchase, settled on Arc in batches                                             |
+| **Arc**                   | Settlement, and the receipts and events Bursar checks before it calls anything settled                                                                                          |
 
 | Path                                     | Role                                                                                                                              |
 | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
@@ -321,7 +321,7 @@ The first check that fails is the reason, so every decision is deterministic and
 | 9   | Within the payee category's limit                   | `CATEGORY_BUDGET_EXCEEDED` |                            |
 | 10  | Within the job's budget                             | `JOB_BUDGET_EXCEEDED`      | `BudgetExceeded`           |
 | 11  | Within what's actually deposited                    | `JOB_UNDERFUNDED`          | `Underfunded`              |
-| 12  | Within the rolling spending window                  | `RATE_LIMITED`             | `RateLimited`              |
+| 12  | Within the spending window                          | `RATE_LIMITED`             | `RateLimited`              |
 
 An `operationId` Bursar has already seen skips the checks and returns its original decision, marked `replayed`.
 
@@ -364,7 +364,7 @@ if (!isPayee[jobId][to] && to != job.agentWallet) revert PayeeNotAllowed();
 if (amount > job.perTxCap) revert PerTxCapExceeded();
 if (job.spent + amount > job.budget) revert BudgetExceeded();
 if (amount > _available(job)) revert Underfunded();
-// …rolling window reset…
+// …window reset…
 if (job.windowSpent + amount > job.windowCap) revert RateLimited();
 if (releasedFor[jobId][opId] != 0) revert OpAlreadyUsed();
 if (job.policyVersion != expectedPolicyVersion) {
@@ -442,7 +442,7 @@ Arc testnet (chain id `5042002`), source verified on [the explorer](https://expl
 | Contract    | Address                                                                                                                            |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | JobVault    | [`0x5Cd51a31fE931D31574Eadd083A0B5c210CA2cB6`](https://explorer.testnet.arc.io/address/0x5Cd51a31fE931D31574Eadd083A0B5c210CA2cB6) |
-| AuditAnchor | [`0xCe76d1DAcbECd7dc4f6D881D673b981EdEE58ac4`](https://explorer.testnet.arc.io/address/0xCe76d1DAcbECd7dc4f6D881D673b981EdEE58ac4) |
+| AuditAnchor | [`0xabAC55f7D30f14275E00393E2307857301Db236c`](https://explorer.testnet.arc.io/address/0xabAC55f7D30f14275E00393E2307857301Db236c) |
 | USDC        | [`0x3600000000000000000000000000000000000000`](https://explorer.testnet.arc.io/address/0x3600000000000000000000000000000000000000) |
 
 More in [`contracts/README.md`](contracts/README.md).

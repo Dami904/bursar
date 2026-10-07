@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { AgentsSection, PayeesSection, type Payee } from "../components/JobSetup.js";
 import { Results } from "../components/Results.js";
@@ -44,12 +45,34 @@ export function Demo() {
           </div>
         )}
         {q.data && <RunPanel />}
-        {q.isPending && <Loading />}
+        {q.isPending && <Waking />}
         {q.error && <DemoUnavailable error={q.error} onRetry={() => void q.refetch()} />}
         {q.data && <DemoJob data={q.data} />}
       </main>
       <Footer />
     </div>
+  );
+}
+
+/**
+ * The server sleeps when nobody's using it, and the first visit wakes it in about a minute. After
+ * a few seconds of loading, say so instead of leaving a skeleton that looks stuck.
+ */
+function Waking() {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setSlow(true), 4_000);
+    return () => clearTimeout(timer);
+  }, []);
+  return (
+    <>
+      {slow && (
+        <p className="mb-4 text-center text-sm text-muted" role="status">
+          Waking the server. It sleeps when nobody&apos;s using it, so this can take up to a minute.
+        </p>
+      )}
+      <Loading />
+    </>
   );
 }
 

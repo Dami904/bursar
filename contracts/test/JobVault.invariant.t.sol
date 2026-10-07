@@ -174,6 +174,17 @@ contract JobVaultInvariantTest is Test {
         }
     }
 
+    /// A closed job is owed nothing: whatever returns to it afterwards (a late refund) goes to its
+    /// owner, so no money is ever left in the vault for a job that can't withdraw it.
+    function invariant_closedJobsOweNothing() public view {
+        for (uint256 i; i < 3; ++i) {
+            bytes32 jobId = handler.jobIds(i);
+            if (vault.getJob(jobId).status == JobVault.Status.Closed) {
+                assertEq(vault.available(jobId), 0, "a closed job is owed money");
+            }
+        }
+    }
+
     /// An operation ID never releases twice.
     function invariant_operationIdsAreSingleUse() public view {
         assertEq(handler.ghostOpsReleasedTwice(), 0);
