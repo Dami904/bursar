@@ -68,7 +68,8 @@ function Waking() {
     <>
       {slow && (
         <p className="mb-4 text-center text-sm text-muted" role="status">
-          Waking the server. It sleeps when nobody&apos;s using it, so this can take up to a minute.
+          Waking the server. It sleeps when nobody&apos;s using it, so this can take a minute or
+          two.
         </p>
       )}
       <Loading />
