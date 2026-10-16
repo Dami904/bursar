@@ -9,7 +9,7 @@ import {
   type Db,
 } from "@bursar/db";
 import { formatUsdc } from "@bursar/money";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import { log } from "./log.js";
 
 /** What one automatic run needs: the brief, and a key that works only for this run. */
@@ -134,10 +134,17 @@ export async function autopilotOnce(deps: AutopilotDeps): Promise<string | null>
     // Asking again with the same brief, and nothing new (no customer payment), is a repeat: don't
     // buy again what an earlier run already delivered. A new brief or a new payment is a new
     // request, even if it buys something an earlier run bought (the demo does this every cycle).
+    // A run that never got going (the model was unavailable) did nothing, so a retry of it is the
+    // request itself, not a repeat of it: skip such runs when looking for the last one.
     const [lastRun] = await db
       .select({ brief: operatorRuns.brief })
       .from(operatorRuns)
-      .where(eq(operatorRuns.jobId, claimed.id))
+      .where(
+        and(
+          eq(operatorRuns.jobId, claimed.id),
+          or(ne(operatorRuns.outcome, "error"), ne(operatorRuns.steps, 0)),
+        ),
+      )
       .orderBy(desc(operatorRuns.createdAt))
       .limit(1);
     const repeat =

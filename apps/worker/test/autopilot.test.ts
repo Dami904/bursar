@@ -258,6 +258,34 @@ describe("autopilot", () => {
     await settle();
   });
 
+  it("treats a retry after a run that never got going as a new request, not a repeat", async () => {
+    // An earlier brief bought something. The owner then wrote a new brief, and its first run hit
+    // an unavailable model (0 steps). The retry must not be told "this brief hasn't changed".
+    const newBrief = "Buy one flier for the plumbing business.";
+    const job = await jobWithHistory("The old brief that bought the earlier image.");
+    await db.update(jobs).set({ brief: newBrief }).where(eq(jobs.id, job.id));
+    const [agent] = await db.select().from(agents).where(eq(agents.jobId, job.id));
+    await db.insert(operatorRuns).values({
+      jobId: job.id,
+      agentId: agent!.id,
+      model: "test",
+      brief: newBrief,
+      steps: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      costMicros: 0n,
+      outcome: "error",
+      summary: "The model call failed: 503",
+    });
+    const fake = fakeRuns();
+    await autopilotOnce({ ...fake.deps, db });
+    const brief = fake.requests[0]!.brief;
+    expect(brief).toContain("new request");
+    expect(brief).not.toContain("don't buy it again");
+    fake.finish();
+    await settle();
+  });
+
   it("treats a new brief as a new request, so a scene that buys the same thing again does", async () => {
     await jobWithHistory("Some earlier brief that is not the current one.");
     const fake = fakeRuns();
