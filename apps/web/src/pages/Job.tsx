@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { JobMenu, JobStatusCard } from "../components/JobActions.js";
 import { Results } from "../components/Results.js";
+import { LiveRun } from "../components/LiveRun.js";
 import {
   AgentsSection,
   BriefSection,
@@ -125,6 +126,7 @@ export function Job() {
       <div className="mt-8 grid grid-cols-[minmax(0,1fr)] gap-8 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <div className="space-y-8">
           <Results runs={runs.data?.runs ?? []} resultBase={`/app/jobs/${j.id}/results`} />
+          <LiveRun jobId={j.id} />
           <section>
             <h2 className="mb-2 text-xs text-muted">Decisions</h2>
             {decisions.isPending && <Loading />}

@@ -1,4 +1,6 @@
+import { randomUUID } from "node:crypto";
 import {
+  addRunEvent,
   agents,
   authorizations,
   credentials,
@@ -7,6 +9,7 @@ import {
   jobs,
   operatorRuns,
   type Db,
+  type RunEventKind,
 } from "@bursar/db";
 import { formatUsdc } from "@bursar/money";
 import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
@@ -17,6 +20,8 @@ export interface RunRequest {
   readonly jobId: string;
   readonly brief: string;
   readonly key: string;
+  /** Groups this run's progress lines (see run_events). */
+  readonly runKey: string;
 }
 
 export interface RunOutcome {
@@ -156,8 +161,17 @@ export async function autopilotOnce(deps: AutopilotDeps): Promise<string | null>
 
   deps.running.add(claimed.id);
   log.info("autopilot run started", { jobId: claimed.id, newRevenue: newRevenue.toString() });
+  const runKey = randomUUID();
+  const note = (kind: RunEventKind, text: string) =>
+    addRunEvent(db, { jobId: claimed.id, runKey, kind, text }).catch((error: unknown) =>
+      log.warn("couldn't save a progress line", { jobId: claimed.id, error: String(error) }),
+    );
+  await note(
+    "started",
+    paidSince ? "A customer paid in: starting a run" : "Starting a run on this job's brief",
+  );
   void deps
-    .run({ jobId: claimed.id, brief, key: issued.key })
+    .run({ jobId: claimed.id, brief, key: issued.key, runKey })
     .then(async (result) => {
       log.info("autopilot run finished", {
         jobId: claimed.id,
@@ -168,6 +182,12 @@ export async function autopilotOnce(deps: AutopilotDeps): Promise<string | null>
         // Never got going (the model was unavailable): try again later, with backoff.
         const attempts = (deps.retries?.get(claimed.id)?.attempts ?? 0) + 1;
         deps.retries?.set(claimed.id, { attempts, after: Date.now() + retryDelay(attempts) });
+        await note(
+          "retry",
+          attempts >= MAX_RETRIES
+            ? `The AI model is still unavailable. Stopped after ${attempts} tries.`
+            : `The AI model was busy. Trying again in about ${Math.round(retryDelay(attempts) / 60_000)} min (try ${attempts} of ${MAX_RETRIES}).`,
+        );
         await db
           .update(jobs)
           .set({ operatorRunAt: null, operatorRevenueSeen: BigInt(claimed.seen) })
@@ -179,9 +199,13 @@ export async function autopilotOnce(deps: AutopilotDeps): Promise<string | null>
         });
       } else {
         deps.retries?.delete(claimed.id);
+        await note("finished", finishedLine(result));
       }
     })
-    .catch((error: unknown) => log.error("autopilot run failed", error, { jobId: claimed.id }))
+    .catch(async (error: unknown) => {
+      log.error("autopilot run failed", error, { jobId: claimed.id });
+      await note("error", "The run stopped unexpectedly");
+    })
     .finally(async () => {
       // The run's key dies with the run.
       await db
@@ -194,6 +218,25 @@ export async function autopilotOnce(deps: AutopilotDeps): Promise<string | null>
       deps.running.delete(claimed.id);
     });
   return claimed.id;
+}
+
+/** The last line of a run's feed, in plain words. */
+function finishedLine(result: RunOutcome): string {
+  const cost = `AI cost $${(result.costMicros / 1_000_000).toFixed(4)}`;
+  switch (result.outcome) {
+    case "completed":
+      return `Done. ${cost}. The answer is in Results.`;
+    case "step_limit":
+      return `Stopped at the step limit. ${cost}.`;
+    case "time_limit":
+      return `Stopped at the time limit. ${cost}.`;
+    case "revoked":
+      return "Stopped: the agent was revoked.";
+    case "refused":
+      return "The model declined this brief.";
+    default:
+      return `Ended with an error. ${cost}.`;
+  }
 }
 
 /** What the owner wrote in a stored run brief: the notes Bursar adds after it are cut off. */

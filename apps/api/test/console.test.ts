@@ -1,10 +1,15 @@
 import {
+  addRunEvent,
   agents as agentsTable,
   authorizations,
   chainEvents,
   credentials,
   jobs,
+  latestRunEvents,
   operatorRuns,
+  pruneRunEvents,
+  runEvents,
+  type RunEventKind,
 } from "@bursar/db";
 import { eq } from "drizzle-orm";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
@@ -195,7 +200,100 @@ describe("console reads", () => {
   });
 });
 
+describe("live run progress", () => {
+  const line = (jobId: string, runKey: string, kind: RunEventKind, text: string) =>
+    addRunEvent(db, { jobId, runKey, kind, text });
+
+  it("shows the newest run's lines in order, active until it reports its end", async () => {
+    const { job, ownerKey } = await seedJob();
+    expect((await call("GET", `/jobs/${job.id}/live`, ownerKey)).body).toEqual({
+      active: false,
+      runKey: null,
+      events: [],
+    });
+
+    await line(job.id, "old", "started", "An earlier run");
+    await line(job.id, "old", "finished", "Done");
+    await line(job.id, "new", "started", "Starting a run");
+    await line(job.id, "new", "step", "Searching the marketplace");
+    const midway = (await call("GET", `/jobs/${job.id}/live`, ownerKey)).body as {
+      active: boolean;
+      runKey: string;
+      events: { kind: string; text: string }[];
+    };
+    expect(midway.active).toBe(true);
+    expect(midway.runKey).toBe("new");
+    expect(midway.events.map((e) => e.text)).toEqual([
+      "Starting a run",
+      "Searching the marketplace",
+    ]);
+
+    await line(job.id, "new", "finished", "Done. The answer is in Results.");
+    const ended = (await call("GET", `/jobs/${job.id}/live`, ownerKey)).body as {
+      active: boolean;
+    };
+    expect(ended.active).toBe(false);
+  });
+
+  it("treats a run that went quiet for ten minutes as over", async () => {
+    const { job } = await seedJob();
+    await line(job.id, "stuck", "step", "Searching");
+    const later = new Date(Date.now() + 11 * 60_000);
+    expect((await latestRunEvents(db, job.id, { now: later })).active).toBe(false);
+    expect((await latestRunEvents(db, job.id)).active).toBe(true);
+  });
+
+  it("is private to the job's owner", async () => {
+    const a = await seedJob();
+    const b = await seedJob();
+    await line(a.job.id, "r", "step", "Secret plans");
+    expect((await call("GET", `/jobs/${a.job.id}/live`, b.ownerKey)).status).toBe(404);
+    expect((await call("GET", `/jobs/${a.job.id}/live`, null)).status).toBe(401);
+    // An agent's key can't read it either: the feed is for the owner.
+    expect((await call("GET", `/jobs/${a.job.id}/live`, a.agents[0]!.key)).status).toBe(403);
+  });
+
+  it("removes lines past their retention and keeps recent ones", async () => {
+    const { job } = await seedJob();
+    await line(job.id, "r", "step", "Old");
+    await db.update(runEvents).set({ createdAt: new Date(Date.now() - 31 * 86_400_000) });
+    await line(job.id, "r", "step", "Recent");
+    expect(await pruneRunEvents(db)).toBe(1);
+    expect((await latestRunEvents(db, job.id)).events.map((e) => e.text)).toEqual(["Recent"]);
+  });
+
+  it("cuts a long line to fit", async () => {
+    const { job } = await seedJob();
+    await line(job.id, "r", "step", "x".repeat(5000));
+    expect((await latestRunEvents(db, job.id)).events[0]!.text).toHaveLength(500);
+  });
+});
+
 describe("live stream", () => {
+  it("says 'change' when a run reports progress", async () => {
+    const { job, ownerKey } = await seedJob();
+    const controller = new AbortController();
+    const response = await api.request("/stream", {
+      headers: { authorization: `Bearer ${ownerKey}` },
+      signal: controller.signal,
+    });
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+    const readUntil = async (count: number) => {
+      while ((text.match(/event: change/g) ?? []).length < count) {
+        const { value } = await reader.read();
+        text += decoder.decode(value);
+      }
+    };
+    await readUntil(1);
+    await addRunEvent(db, { jobId: job.id, runKey: "r", kind: "step", text: "Searching" });
+    await readUntil(2);
+    controller.abort();
+    await reader.cancel().catch(() => undefined);
+    expect((text.match(/event: change/g) ?? []).length).toBeGreaterThanOrEqual(2);
+  });
+
   it("says 'change' straight away and again when something happens", async () => {
     const { agents, ownerKey } = await seedJob();
     const controller = new AbortController();

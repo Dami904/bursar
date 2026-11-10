@@ -531,6 +531,31 @@ export const approvals = pgTable(
   (t) => [uniqueIndex("approvals_authorization_idx").on(t.authorizationId)],
 );
 
+/**
+ * What a run is doing right now, one line per step, so the console can show it as it happens
+ * (searching, comparing, paying, waiting for approval). Written by the worker while a run is in
+ * progress; read-only for owners. Text is written by Bursar from its own records plus the model's
+ * own words, so the console shows it as plain text. Old rows are pruned.
+ */
+export const runEvents = pgTable(
+  "run_events",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id),
+    /** Groups the events of one automatic run. */
+    runKey: text("run_key").notNull(),
+    /** 0 for the operator, 1 for a helper it started. */
+    depth: integer("depth").notNull().default(0),
+    /** started | step | found | paid | blocked | waiting | helper | retry | error | finished */
+    kind: text("kind").notNull(),
+    text: text("text").notNull(),
+    createdAt: at("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("run_events_job_idx").on(t.jobId, t.id)],
+);
+
 /** One run of the AI operator (or a sub-agent): what it cost and what it concluded. */
 export const operatorRuns = pgTable(
   "operator_runs",

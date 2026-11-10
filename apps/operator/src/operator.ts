@@ -24,6 +24,20 @@ export interface OperatorOptions {
   /** 0 for the main operator, 1 for a helper it spawned. Helpers can't spawn helpers. */
   readonly depth?: number;
   readonly log?: (event: string, fields: Record<string, unknown>) => void;
+  /**
+   * Called with a short plain-words line as each step happens, so the owner can watch the run.
+   * A failure here is ignored: progress never stops a run.
+   */
+  readonly onEvent?: (event: ProgressEvent) => void;
+}
+
+export type ProgressKind = "step" | "found" | "paid" | "blocked" | "waiting" | "helper" | "error";
+
+/** One line of progress. `depth` is 0 for the operator and 1 for a helper it started. */
+export interface ProgressEvent {
+  readonly kind: ProgressKind;
+  readonly text: string;
+  readonly depth: number;
 }
 
 export type Outcome = "completed" | "step_limit" | "time_limit" | "revoked" | "refused" | "error";
@@ -253,6 +267,13 @@ export async function runOperator(options: OperatorOptions): Promise<OperatorRes
   const depth = options.depth ?? 0;
   const maxSteps = options.maxSteps ?? (depth === 0 ? DEFAULT_MAX_STEPS : HELPER_MAX_STEPS);
   const log = options.log ?? (() => undefined);
+  const say = (kind: ProgressKind, text: string) => {
+    try {
+      options.onEvent?.({ kind, text, depth });
+    } catch {
+      // Progress is a courtesy: it never stops a run.
+    }
+  };
   const runId = randomBytes(6).toString("hex");
   const tools = depth === 0 ? [...TOOLS, HELPER_TOOL] : TOOLS;
   const session = provider.start(SYSTEM_PROMPT, tools, `Brief:\n${options.brief}`);
@@ -264,6 +285,26 @@ export async function runOperator(options: OperatorOptions): Promise<OperatorRes
   let purchases = 0;
   let outcome: Outcome = "step_limit";
   let summary = "";
+
+  /** What a purchase or invoice came to, in words: paid, blocked, or waiting for the owner. */
+  function sayOutcome(result: Record<string, unknown>) {
+    const purchase = (result.purchase ?? null) as Record<string, unknown> | null;
+    if (result.result === "DENIED") {
+      say("blocked", `Blocked: ${String(result.reason ?? "a rule on this job")}`);
+      return;
+    }
+    sayState(String(purchase?.state ?? ""), result.amount);
+  }
+  function sayState(state: string, amount: unknown) {
+    const usdc = typeof amount === "string" ? `${amount} USDC` : "the payment";
+    if (state === "SETTLED") say("paid", `Paid ${usdc}`);
+    else if (state === "PENDING_APPROVAL") say("waiting", `Waiting for your approval: ${usdc}`);
+    else if (GOING_THROUGH.has(state)) say("step", `Payment of ${usdc} is going through`);
+    else if (state === "REJECTED") say("blocked", `The payment of ${usdc} was rejected`);
+    else if (state === "UNRESOLVED") {
+      say("waiting", `The payment of ${usdc} is stuck; Bursar will settle or return it`);
+    }
+  }
 
   async function execute(call: ToolCall): Promise<ToolResult> {
     const ok = (value: unknown): ToolResult => ({
@@ -279,15 +320,26 @@ export async function runOperator(options: OperatorOptions): Promise<OperatorRes
     try {
       switch (call.name) {
         case "get_budget":
+          say("step", "Checking the budget");
           return ok(await bursar.budget());
         case "list_sellers":
+          say("step", "Looking at who this job may pay");
           return ok(presentSellers(await bursar.payees()));
         case "search_marketplace": {
-          const found = (await bursar.marketplace(str(call.args, "query"))) as {
+          const query = str(call.args, "query");
+          say("step", `Searching the marketplace for "${query.slice(0, 80)}"`);
+          const found = (await bursar.marketplace(query)) as {
             results?: unknown;
             unavailable?: unknown;
             note?: unknown;
           };
+          const count = Array.isArray(found.results) ? found.results.length : 0;
+          say(
+            "found",
+            count === 0
+              ? "The marketplace had nothing that fits"
+              : `Found ${count} service${count === 1 ? "" : "s"}`,
+          );
           return ok({
             untrusted_marketplace_listings: found.results ?? [],
             unavailable: found.unavailable ?? [],
@@ -295,12 +347,23 @@ export async function runOperator(options: OperatorOptions): Promise<OperatorRes
             ...(typeof found.note === "string" ? { note: found.note } : {}),
           });
         }
-        case "quote":
-          return ok(await bursar.quote(str(call.args, "url"), sellerRequest(call.args)));
+        case "quote": {
+          const url = str(call.args, "url");
+          say("step", `Asking ${hostOf(url)} for its price`);
+          const quoted = (await bursar.quote(url, sellerRequest(call.args))) as { price?: unknown };
+          say(
+            "found",
+            typeof quoted.price === "string"
+              ? `${hostOf(url)} quoted ${quoted.price} USDC`
+              : `Got a quote from ${hostOf(url)}`,
+          );
+          return ok(quoted);
+        }
         case "purchase": {
           const request = sellerRequest(call.args);
           const reasoning = purchaseReason(call.args);
           purchases += 1;
+          say("step", `Buying from ${hostOf(str(call.args, "url"))}: ${reasonOf(call.args)}`);
           const result = await bursar.purchase({
             operationId: `op-${runId}-${purchases}`,
             url: str(call.args, "url"),
@@ -308,10 +371,15 @@ export async function runOperator(options: OperatorOptions): Promise<OperatorRes
             reasoning,
             ...request,
           });
+          sayOutcome(result);
           return ok(presentPurchase(result));
         }
         case "pay_invoice": {
           purchases += 1;
+          say(
+            "step",
+            `Paying invoice ${str(call.args, "invoice_ref").slice(0, 40)}: ${reasonOf(call.args)}`,
+          );
           const result = await bursar.invoice({
             operationId: `op-${runId}-${purchases}`,
             payee: str(call.args, "payee"),
@@ -319,6 +387,7 @@ export async function runOperator(options: OperatorOptions): Promise<OperatorRes
             invoiceRef: str(call.args, "invoice_ref"),
             reasoning: str(call.args, "reasoning"),
           });
+          sayOutcome(result);
           return ok(presentPurchase(result));
         }
         case "check_purchase": {
@@ -326,6 +395,7 @@ export async function runOperator(options: OperatorOptions): Promise<OperatorRes
           // check answered at once. Wait here, up to a limit, while the payment is going through
           // (not while it waits for a person: that can take hours).
           const id = str(call.args, "authorization_id");
+          say("step", "Checking on a payment");
           const waitUntil = Date.now() + (options.checkWaitMs ?? CHECK_WAIT_MS);
           let latest = await bursar.authorization(id);
           while (GOING_THROUGH.has(String(latest.state)) && Date.now() < waitUntil) {
@@ -334,6 +404,7 @@ export async function runOperator(options: OperatorOptions): Promise<OperatorRes
             );
             latest = await bursar.authorization(id);
           }
+          sayState(String(latest.state), latest.amount);
           return ok(presentAuthorization(latest));
         }
         case "spawn_helper": {
@@ -345,12 +416,14 @@ export async function runOperator(options: OperatorOptions): Promise<OperatorRes
             spendLimit: str(call.args, "spend_limit"),
           });
           log("helper started", { role, helperAgentId: helper.agent.id });
+          say("helper", `Started a helper for ${role.slice(0, 60)}`);
           const result = await runOperator({
             provider,
             bursar: bursar.as(helper.key),
             brief: str(call.args, "brief"),
             depth: depth + 1,
             log,
+            ...(options.onEvent === undefined ? {} : { onEvent: options.onEvent }),
           });
           childCostMicros += result.costMicros;
           childPurchases += result.purchases;
@@ -388,8 +461,10 @@ export async function runOperator(options: OperatorOptions): Promise<OperatorRes
       const turn = await session.next();
       steps += 1;
       usage = addUsage(usage, turn.usage);
-      if (turn.text !== "")
+      if (turn.text !== "") {
         log("model said", { depth, step: steps, text: turn.text.slice(0, 2_000) });
+        say("step", turn.text.trim().slice(0, 300));
+      }
 
       if (turn.stop === "refused") {
         outcome = "refused";
@@ -442,10 +517,12 @@ export async function runOperator(options: OperatorOptions): Promise<OperatorRes
       // Kill switch: the owner revoked this agent (or its parent). Stop at once.
       outcome = "revoked";
       summary = "Stopped: this agent's key was revoked.";
+      say("error", summary);
       log("operator revoked", { depth });
     } else {
       outcome = "error";
       summary = `The model call failed: ${error instanceof Error ? error.message : String(error)}`;
+      say("error", "The AI model didn't answer");
       log("operator error", { depth, error: summary });
     }
   }
@@ -485,6 +562,19 @@ export async function runOperator(options: OperatorOptions): Promise<OperatorRes
     costMicros: result.costMicros,
   });
   return result;
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "the seller";
+  }
+}
+
+/** The model's own reason for a purchase, trimmed to fit a progress line. */
+function reasonOf(args: Record<string, unknown>): string {
+  return typeof args.reasoning === "string" ? args.reasoning.trim().slice(0, 200) : "";
 }
 
 /** The allow-list, with each seller's own catalog descriptions marked as untrusted. */

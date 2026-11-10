@@ -77,6 +77,7 @@ import {
   ownerActivity,
   ownerJobEvents,
   jobPayees,
+  jobLiveRun,
   jobRuns,
   listJobs,
   runResult,
@@ -717,6 +718,12 @@ export function createApp(db: Db, deps: ApiDeps = {}) {
   app.get("/jobs/:id/runs", async (c) => {
     const owner = require(c, "OWNER");
     return c.json({ runs: await jobRuns(db, owner.ownerId, c.req.param("id")) });
+  });
+
+  /** The newest run's progress, line by line: what the operator is doing right now. */
+  app.get("/jobs/:id/live", async (c) => {
+    const owner = require(c, "OWNER");
+    return c.json(await jobLiveRun(db, owner.ownerId, c.req.param("id")));
   });
 
   app.get("/jobs/:id/decisions", async (c) => {

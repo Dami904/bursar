@@ -159,6 +159,104 @@ describe("operator loop", () => {
     });
   });
 
+  it("reports each step in plain words as it happens, without the request body", async () => {
+    const provider = new ScriptedProvider([
+      [
+        turn([call("search_marketplace", { query: "news search" })], "Looking for a news source."),
+        turn([
+          call("purchase", {
+            url: "https://seller.example/x",
+            method: "POST",
+            body_json: '{"secret":"do-not-show"}',
+            max_price: "0.05",
+            reasoning: "needed for the brief",
+            alternatives: "none: the only allowed seller offering it",
+          }),
+        ]),
+        turn([call("finish", { summary: "done" })]),
+      ],
+    ]);
+    const lines: { kind: string; text: string; depth: number }[] = [];
+    await runOperator({
+      provider,
+      bursar: fakeBursar().bursar,
+      brief: "b",
+      onEvent: (e) => lines.push({ ...e }),
+    });
+    expect(lines.map((l) => l.kind)).toEqual(["step", "step", "found", "step", "paid"]);
+    expect(lines[0]!.text).toBe("Looking for a news source.");
+    expect(lines[1]!.text).toBe('Searching the marketplace for "news search"');
+    expect(lines[2]!.text).toBe("Found 1 service");
+    expect(lines[3]!.text).toBe("Buying from seller.example: needed for the brief");
+    expect(lines[4]!.text).toBe("Paid 0.01 USDC");
+    expect(lines.every((l) => l.depth === 0)).toBe(true);
+    // The request body can hold anything the model wrote: it never goes into the feed.
+    expect(JSON.stringify(lines)).not.toContain("do-not-show");
+  });
+
+  it("says when a payment waits for the owner, and when a purchase is blocked", async () => {
+    const provider = new ScriptedProvider([
+      [
+        turn([
+          call("pay_invoice", {
+            payee: "0x" + "ab".repeat(20),
+            amount: "0.25",
+            invoice_ref: "INV-1",
+            reasoning: "due now",
+          }),
+        ]),
+        turn([call("finish", { summary: "done" })]),
+      ],
+    ]);
+    const lines: string[] = [];
+    await runOperator({
+      provider,
+      bursar: fakeBursar().bursar,
+      brief: "b",
+      onEvent: (e) => lines.push(`${e.kind}: ${e.text}`),
+    });
+    expect(lines).toContain("waiting: Waiting for your approval: 0.25 USDC");
+
+    const denied = fakeBursar({
+      purchase: async () => ({ result: "DENIED", reason: "PER_TX_CAP_EXCEEDED", amount: "9.00" }),
+    });
+    const blocked: string[] = [];
+    await runOperator({
+      provider: new ScriptedProvider([
+        [
+          turn([
+            call("purchase", {
+              url: "https://seller.example/x",
+              max_price: "9",
+              reasoning: "r",
+              alternatives: "none: the only allowed seller offering it",
+            }),
+          ]),
+          turn([call("finish", { summary: "done" })]),
+        ],
+      ]),
+      bursar: denied.bursar,
+      brief: "b",
+      onEvent: (e) => blocked.push(`${e.kind}: ${e.text}`),
+    });
+    expect(blocked).toContain("blocked: Blocked: PER_TX_CAP_EXCEEDED");
+  });
+
+  it("keeps going when the progress callback throws", async () => {
+    const provider = new ScriptedProvider([
+      [turn([call("get_budget")]), turn([call("finish", { summary: "all good" })])],
+    ]);
+    const result = await runOperator({
+      provider,
+      bursar: fakeBursar().bursar,
+      brief: "b",
+      onEvent: () => {
+        throw new Error("database down");
+      },
+    });
+    expect(result).toMatchObject({ outcome: "completed", summary: "all good" });
+  });
+
   it("hands seller content to the model marked as untrusted data", async () => {
     const provider = new ScriptedProvider([
       [

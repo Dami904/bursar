@@ -1,5 +1,5 @@
 import { Check, Copy, ExternalLink } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import type { Job } from "../lib/api.js";
 import { demoLink, txUrl } from "../lib/config.js";
@@ -100,8 +100,15 @@ export function Skeleton({ className = "" }: { className?: string }) {
 
 /** What a page looks like before its data arrives: a title, a figure and a few rows. */
 export function Loading() {
+  const seconds = useSeconds();
   return (
     <div className="mx-auto max-w-xl space-y-4 py-8" role="status" aria-label="Loading">
+      {seconds >= WAKING_AFTER_S && (
+        <p className="text-sm text-muted">
+          Waking the server… {seconds}s. It sleeps when nobody is using it, so the first visit can
+          take a minute or two.
+        </p>
+      )}
       <Skeleton className="h-4 w-24" />
       <Skeleton className="h-8 w-3/4" />
       <Skeleton className="h-40 w-full rounded-2xl" />
@@ -109,6 +116,19 @@ export function Loading() {
       <Skeleton className="h-4 w-2/3" />
     </div>
   );
+}
+
+/** A loading page that takes this long is probably a server waking up, not a slow query. */
+const WAKING_AFTER_S = 5;
+
+/** Whole seconds since this component appeared. */
+function useSeconds(): number {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return seconds;
 }
 
 /** Copies `text` and says so for a moment. For hashes and ids nobody wants to retype. */

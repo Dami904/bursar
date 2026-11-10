@@ -132,6 +132,33 @@ export interface Run {
   aiCost: string;
 }
 
+/** One line of what the operator is doing: plain text, never markup. */
+export interface LiveEvent {
+  id: number;
+  at: string;
+  /** 0 for the operator, 1 for a helper it started. */
+  depth: number;
+  kind:
+    | "started"
+    | "step"
+    | "found"
+    | "paid"
+    | "blocked"
+    | "waiting"
+    | "helper"
+    | "retry"
+    | "error"
+    | "finished";
+  text: string;
+}
+
+/** The newest run's progress. `active` is true while it is still going. */
+export interface LiveRun {
+  active: boolean;
+  runKey: string | null;
+  events: LiveEvent[];
+}
+
 /** An image, audio or video a seller delivered, kept by us. */
 export interface MediaItem {
   url: string;

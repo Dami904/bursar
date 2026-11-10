@@ -6,6 +6,7 @@ import {
   hashKey,
   jobs,
   operatorRuns,
+  runEvents,
   type Db,
 } from "@bursar/db";
 import { parseUsdc } from "@bursar/money";
@@ -103,6 +104,43 @@ describe("autopilot", () => {
     expect(await keyWorks(key)).toBe(false);
     expect(deps.running.size).toBe(0);
     expect(await autopilotOnce(deps)).toBeNull();
+  });
+
+  it("writes the run's start and end to the progress feed, and says when it will retry", async () => {
+    const job = await liveJob();
+    const fake = fakeRuns();
+    const deps = { ...fake.deps, db };
+    await autopilotOnce(deps);
+    const started = await db.select().from(runEvents).where(eq(runEvents.jobId, job.id));
+    expect(started.map((e) => e.kind)).toEqual(["started"]);
+    expect(started[0]!.runKey).toBe(fake.requests[0]!.runKey);
+
+    // The model was unavailable: the feed says so, and when it will try again.
+    fake.finish("error", 0);
+    await settle();
+    const after = await db
+      .select()
+      .from(runEvents)
+      .where(eq(runEvents.jobId, job.id))
+      .orderBy(runEvents.id);
+    expect(after.map((e) => e.kind)).toEqual(["started", "retry"]);
+    expect(after[1]!.text).toContain("Trying again in about 2 min");
+    expect(after[1]!.text).toContain("try 1 of 5");
+  });
+
+  it("ends a finished run's feed with a plain line", async () => {
+    const job = await liveJob();
+    const fake = fakeRuns();
+    await autopilotOnce({ ...fake.deps, db });
+    fake.finish("completed", 4);
+    await settle();
+    const rows = await db
+      .select()
+      .from(runEvents)
+      .where(eq(runEvents.jobId, job.id))
+      .orderBy(runEvents.id);
+    expect(rows.at(-1)).toMatchObject({ kind: "finished" });
+    expect(rows.at(-1)!.text).toContain("Done.");
   });
 
   it("runs again when new revenue arrives, and says how much", async () => {

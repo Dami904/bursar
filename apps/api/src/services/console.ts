@@ -9,6 +9,7 @@ import {
   chainEvents,
   decisions,
   jobs,
+  latestRunEvents,
   operatorRuns,
   payees,
   type Db,
@@ -63,6 +64,15 @@ export async function jobRuns(db: Db, ownerId: string, jobId: string, limit = 20
     .orderBy(desc(operatorRuns.createdAt))
     .limit(limit);
   return rows.map((r) => runView(r.run));
+}
+
+/**
+ * What the newest run is doing right now, line by line, for the job page's live panel. The lines
+ * include the model's own words, which can echo seller content: show them as text, never markup.
+ */
+export async function jobLiveRun(db: Db, ownerId: string, jobId: string) {
+  const job = await getOwnedJob(db, ownerId, jobId);
+  return latestRunEvents(db, job.id);
 }
 
 function runView(r: typeof operatorRuns.$inferSelect) {
@@ -330,7 +340,9 @@ export async function ownerFingerprint(db: Db, ownerId: string): Promise<string>
       (select count(*) || ':' || count(*) filter (where ag.status = 'REVOKED')
          from agents ag join jobs j on j.id = ag.job_id where j.owner_id = ${ownerId}) as agents,
       (select coalesce(max(an.anchor_seq), 0) from audit_anchors an
-        where an.status = 'CONFIRMED') as anchors`)) as unknown as Record<string, unknown>[];
+        where an.status = 'CONFIRMED') as anchors,
+      (select coalesce(max(e.id), 0) from run_events e join jobs j on j.id = e.job_id
+        where j.owner_id = ${ownerId}) as progress`)) as unknown as Record<string, unknown>[];
   return JSON.stringify(row ?? {});
 }
 

@@ -1,10 +1,12 @@
 import {
+  addRunEvent,
   authorizations,
   backfillDecisions,
   computeMetrics,
   createDb,
   jobs,
   metricsDaily,
+  pruneRunEvents,
 } from "@bursar/db";
 import { parseUsdc } from "@bursar/money";
 import { bursarClient, hasModelKey, providerFromEnv, runOperator } from "@bursar/operator";
@@ -16,7 +18,7 @@ import { arc, arcTestnet } from "viem/chains";
 import type { WorkerEnv } from "./env.js";
 import { deliverAlerts, pollTelegram, produceAlerts } from "./alerts.js";
 import { anchorOnce } from "./anchor.js";
-import { autopilotOnce } from "./autopilot.js";
+import { autopilotOnce, type RunRequest } from "./autopilot.js";
 import {
   approveDemoPayments,
   demoApprovalWaiting,
@@ -87,6 +89,8 @@ export async function startWorker(env: WorkerEnv): Promise<RunningWorker | null>
   async function snapshotMetrics() {
     if (Date.now() - lastSnapshotAt < 3_600_000) return;
     lastSnapshotAt = Date.now();
+    const pruned = await pruneRunEvents(db);
+    if (pruned > 0) log.info("old run progress lines removed", { pruned });
     const day = new Date().toISOString().slice(0, 10);
     const network = chain.id === arc.id ? "mainnet" : "testnet";
     const owners = await db.selectDistinct({ ownerId: jobs.ownerId }).from(jobs);
@@ -113,13 +117,26 @@ export async function startWorker(env: WorkerEnv): Promise<RunningWorker | null>
           db,
           running: new Set<string>(),
           retries: new Map<string, { attempts: number; after: number }>(),
-          run: async ({ brief, key }: { brief: string; key: string }) =>
-            runOperator({
+          run: async ({ jobId, brief, key, runKey }: RunRequest) => {
+            // Progress lines are written one after another, so the owner reads them in order.
+            let saving: Promise<unknown> = Promise.resolve();
+            const result = await runOperator({
               provider: providerFromEnv(),
               bursar: bursarClient(env.BURSAR_API_URL, key),
               brief,
               log: (event, fields) => log.info(`operator: ${event}`, fields),
-            }),
+              onEvent: (e) => {
+                saving = saving.then(() =>
+                  addRunEvent(db, { jobId, runKey, depth: e.depth, kind: e.kind, text: e.text }).catch(
+                    (error: unknown) =>
+                      log.warn("couldn't save a progress line", { jobId, error: String(error) }),
+                  ),
+                );
+              },
+            });
+            await saving;
+            return result;
+          },
         }
       : null;
   if (autopilot === null) log.info("autopilot off (no model key, or AUTOPILOT=false)");
