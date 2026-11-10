@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { approveLabel, FirstApprovalNote } from "../components/ApproveNote.js";
 import { Button, Card, ErrorLine, Loading } from "../components/ui.js";
 import { api, type PendingApproval } from "../lib/api.js";
 import { useApprove, useReject } from "../lib/approve.js";
@@ -47,12 +48,13 @@ function ApprovalItem({ pending }: { pending: PendingApproval }) {
       <p className="mt-3 font-voice italic">"{pending.reasoning}"</p>
       <div className="mt-4 flex flex-col gap-2">
         <Button primary className="py-3" disabled={busy} onClick={() => approve.mutate(pending)}>
-          {approve.isPending ? "Sign in your wallet…" : "Approve"}
+          {approve.isPending ? approveLabel(approve.step) : "Approve"}
         </Button>
         <Button disabled={busy} onClick={() => reject.mutate(pending)}>
           Reject
         </Button>
       </div>
+      <FirstApprovalNote pending={pending} />
       <div className="mt-2">
         <ErrorLine error={approve.error ?? reject.error} />
       </div>

@@ -49,7 +49,7 @@ Bursar's API also verifies your signature before passing it on, so a wrong or ex
 
 ## Who can approve
 
-When you sign in to the console, your own wallet becomes an approver for your jobs, and the wizard registers it as the job's approver in the vault ("Let your wallet approve payments").
+When you sign in to the console, your own wallet can approve payments on your jobs. The first time you approve on a job, your wallet asks twice: once to register itself as that job's approver in the vault, then to sign the payment. After that, each approval is one signature. Only the job's owner wallet can register an approver.
 
 You can add other approvers, such as a finance lead or a co-founder. It takes two steps today: `POST /approvers` with their name and wallet address (they then sign in with that wallet and see only Approvals), and allowing their wallet in the vault with `setApprover` from your wallet. The console doesn't do the second step for other people's wallets yet.
 

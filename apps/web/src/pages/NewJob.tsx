@@ -5,12 +5,13 @@ import { Check, Plus, X } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 import type { Hex } from "viem";
-import { useConnection, useSwitchChain, useWriteContract } from "wagmi";
-import { waitForTransactionReceipt } from "wagmi/actions";
+import { useConnection, useReadContract, useSwitchChain, useWriteContract } from "wagmi";
+import { readContract, waitForTransactionReceipt } from "wagmi/actions";
 import { KeyReveal } from "../components/JobSetup.js";
 import { Button, Card, ErrorLine } from "../components/ui.js";
 import { api, type Job } from "../lib/api.js";
 import { config } from "../lib/config.js";
+import { planSetup } from "../lib/setup.js";
 import { wagmiConfig } from "../lib/wagmi.js";
 
 interface Payee {
@@ -31,8 +32,8 @@ const field =
 
 /**
  * Create a job in three short steps. The last one runs the on-chain part from the owner's wallet:
- * create the job in the vault, fund it, let the owner's wallet approve payments, and allow any
- * vendors. Each step can be retried if the wallet is closed or a transaction fails.
+ * open the job in the vault, allow the exact deposit, deposit it (see lib/setup.ts: three
+ * confirmations at most). Each step can be retried if the wallet is closed or a transaction fails.
  */
 export function NewJob() {
   const [step, setStep] = useState(1);
@@ -315,51 +316,18 @@ function FundStep({
   const [agentKey, setAgentKey] = useState<string | null>(null);
 
   const vendors = draft.payees.filter((p) => p.kind === "ADDRESS");
-  // What each step does, in plain words, and whether it needs a confirmation in the wallet.
-  const steps: { id: string; label: string; why: string; signs: boolean }[] = [
-    {
-      id: "create",
-      label: "Create the job",
-      why: "Saved in Bursar. Nothing is signed.",
-      signs: false,
-    },
-    {
-      id: "vault",
-      label: "Open it in the vault",
-      why: "Registers the job's rules on Arc.",
-      signs: true,
-    },
-    {
-      id: "approve",
-      label: "Allow the deposit",
-      why: "Lets the vault take the deposit from your wallet. No money moves yet.",
-      signs: true,
-    },
-    {
-      id: "fund",
-      label: `Deposit ${draft.budget} USDC`,
-      why: "Moves it into the vault. It stays yours: agents can only spend within your rules.",
-      signs: true,
-    },
-    {
-      id: "approver",
-      label: "Let your wallet approve payments",
-      why: "So you can sign off on larger payments from this wallet.",
-      signs: true,
-    },
-    ...vendors.map((v) => ({
-      id: `vendor:${v.value}`,
-      label: `Allow ${v.label || v.value.slice(0, 8)}`,
-      why: "Lets the vault pay this vendor address, and no other.",
-      signs: true,
-    })),
-    {
-      id: "live",
-      label: "Waiting for Arc",
-      why: "Arc confirms it, usually in under a minute.",
-      signs: false,
-    },
-  ];
+  const amountNow = parseUsdc(draft.budget);
+  // What the wallet already lets the vault take: if it covers this deposit, there's no allow step.
+  const allowance = useReadContract({
+    address: config.usdc,
+    abi: usdcAbi,
+    functionName: "allowance",
+    args: connection.address === undefined ? undefined : [connection.address, config.vault],
+    query: { enabled: connection.address !== undefined && job === null },
+  });
+  // Opening, allowing and depositing: three confirmations at most. Registering your wallet as an
+  // approver and allowing vendor addresses happen later, when they're first needed.
+  const steps = planSetup({ budget: draft.budget, amount: amountNow, allowance: allowance.data });
   const confirmations = steps.filter((s) => s.signs);
   const confirmed = confirmations.filter((s) => states[s.id] === "done").length;
 
@@ -442,16 +410,25 @@ function FundStep({
           }),
         ),
       );
-      await once("approve", () =>
-        send(
+      // Read what the wallet allows right now, not what the page saw earlier: if it already covers
+      // this exact deposit, the allow step is skipped (and the wallet isn't asked).
+      await once("approve", async () => {
+        const allowed = await readContract(wagmiConfig, {
+          address: config.usdc,
+          abi: usdcAbi,
+          functionName: "allowance",
+          args: [owner, config.vault],
+        });
+        if (allowed >= amount) return;
+        await send(
           write({
             address: config.usdc,
             abi: usdcAbi,
             functionName: "approve",
             args: [config.vault, amount],
           }),
-        ),
-      );
+        );
+      });
       await once("fund", () =>
         send(
           write({
@@ -462,28 +439,6 @@ function FundStep({
           }),
         ),
       );
-      await once("approver", () =>
-        send(
-          write({
-            address: config.vault,
-            abi: jobVaultAbi,
-            functionName: "setApprover",
-            args: [vaultJobId, owner, true],
-          }),
-        ),
-      );
-      for (const v of vendors) {
-        await once(`vendor:${v.value}`, () =>
-          send(
-            write({
-              address: config.vault,
-              abi: jobVaultAbi,
-              functionName: "setPayee",
-              args: [vaultJobId, v.value as Hex, true],
-            }),
-          ),
-        );
-      }
       await once("live", async () => {
         for (let i = 0; i < 60; i += 1) {
           const fresh = await api<Job>(`/jobs/${j.id}`);
@@ -504,7 +459,9 @@ function FundStep({
     }
   }
 
-  if (agentKey !== null && job !== null) return <Done job={job} agentKey={agentKey} />;
+  if (agentKey !== null && job !== null) {
+    return <Done job={job} agentKey={agentKey} vendors={vendors.length} />;
+  }
 
   return (
     <div className="space-y-4">
@@ -583,11 +540,18 @@ function FundStep({
   );
 }
 
-function Done({ job, agentKey }: { job: Job; agentKey: string }) {
+function Done({ job, agentKey, vendors }: { job: Job; agentKey: string; vendors: number }) {
   return (
     <div className="space-y-4">
       <p className="font-medium">{job.title} is live</p>
       <KeyReveal agentKey={agentKey} />
+      {vendors > 0 && (
+        <p className="text-sm text-muted">
+          {vendors === 1 ? "Your vendor address needs" : `Your ${vendors} vendor addresses need`} one
+          confirmation each before the job can pay {vendors === 1 ? "it" : "them"}. Open the job, and
+          under Who can be paid, choose Allow in vault.
+        </p>
+      )}
       <Link to={`/app/jobs/${job.id}`}>
         <Button primary className="w-full">
           Open job

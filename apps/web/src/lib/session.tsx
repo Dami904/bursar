@@ -37,7 +37,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (address === undefined || connection.connector?.id !== connectorId) {
         const connector = connectors.find((c) => c.id === connectorId);
         if (connector === undefined) throw new Error("That wallet isn't available here");
-        const result = await connect({ connector });
+        // Connecting on Arc's chain id means the wallet never needs a separate "switch network" popup.
+        const result = await connect({ connector, chainId: config.chain.id });
         address = result.accounts[0];
       }
       if (address === undefined) throw new Error("No account in that wallet");

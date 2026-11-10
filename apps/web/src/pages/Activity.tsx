@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Check, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
+import { approveLabel, FirstApprovalNote } from "../components/ApproveNote.js";
 import { MediaGallery } from "../components/Media.js";
 import {
   AgentMark,
@@ -441,12 +442,13 @@ function ApproveBar({ pending }: { pending: PendingApproval }) {
       <p className="text-sm text-needs">This is waiting for you.</p>
       <div className="mt-3 flex gap-2">
         <Button primary className="flex-1" disabled={busy} onClick={() => approve.mutate(pending)}>
-          {approve.isPending ? "Sign in your wallet…" : "Approve"}
+          {approve.isPending ? approveLabel(approve.step) : "Approve"}
         </Button>
         <Button disabled={busy} onClick={() => reject.mutate(pending)}>
           Reject
         </Button>
       </div>
+      <FirstApprovalNote pending={pending} />
       <div className="mt-2">
         <ErrorLine error={approve.error ?? reject.error} />
       </div>

@@ -30,19 +30,22 @@ You can add more payees later from the job page. Anything not on the list is ref
 
 ## Step 3: fund it on Arc
 
-The last step runs from your wallet. Each line is one confirmation, and any step that fails (a closed wallet, a dropped connection) can be retried.
+The last step runs from your wallet, and asks for three confirmations at most. Any step that fails (a closed wallet, a dropped connection) can be retried.
 
-1. **Create the job**: Bursar records the job and creates the job's payment wallet (a Circle wallet that only ever holds money for payments in flight).
-2. **Open it in the vault**: your wallet calls `createJob` on JobVault with the job's rules. From now on you are the job's owner on-chain, and only you can change its rules.
-3. **Allow the deposit**: a standard USDC approval, so the vault can take the budget from your wallet.
-4. **Deposit the budget**: the vault takes exactly the budget amount.
-5. **Let your wallet approve payments**: registers your wallet as the job's approver in the vault, so your approvals are accepted on-chain.
-6. **Allow each vendor wallet**: for every wallet payee, the vault's own allow-list is updated too. x402 sellers don't need this step: purchases go through the job's payment wallet, which the vault always allows.
-7. **Waiting for Arc**: Bursar's indexer sees the job open and funded on-chain, and marks it **active**.
+1. **Create the job**: Bursar records the job and creates the job's payment wallet (a Circle wallet that only ever holds money for payments in flight). Nothing is signed.
+2. **Open it in the vault** (confirmation 1): your wallet calls `createJob` on JobVault with the job's rules. From now on you are the job's owner on-chain, and only you can change its rules.
+3. **Allow the deposit** (confirmation 2): a USDC approval for exactly the budget, so the vault can take that amount from your wallet once. Never more. If your wallet already allows at least the budget, this step is skipped.
+4. **Deposit the budget** (confirmation 3): the vault takes exactly the budget amount.
+5. **Waiting for Arc**: Bursar's indexer sees the job open and funded on-chain, and marks it **active**.
+
+Two things that used to be part of setup now happen when you first need them, so setup stays short:
+
+- **Your wallet as an approver.** The first time you approve a payment on a job, your wallet asks twice: once to register itself as that job's approver in the vault, then to sign the payment. After that, one signature per approval. A job where no payment can ever need your approval never asks for it.
+- **Vendor wallets.** For every wallet payee, press its **Allow in vault** button on the job page (one confirmation each). x402 sellers don't need this: purchases go through the job's payment wallet, which the vault always allows.
 
 <Callout type="warn">
 
-Wallet payees must be allowed in two places: in Bursar and in the vault. The wizard does both. If you add a vendor wallet later from the job page, press its **Allow in vault** button, or the vault will refuse to pay it even if Bursar allows it.
+Wallet payees must be allowed in two places: in Bursar and in the vault. Bursar's allow-list takes effect when you add the payee. The vault's takes effect when you press **Allow in vault**. Until you do, the vault will refuse to pay that wallet even though Bursar allows it.
 
 </Callout>
 

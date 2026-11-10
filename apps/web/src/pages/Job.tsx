@@ -2,9 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
+import { approveLabel, FirstApprovalNote } from "../components/ApproveNote.js";
 import { JobMenu, JobStatusCard } from "../components/JobActions.js";
-import { Results } from "../components/Results.js";
 import { LiveRun } from "../components/LiveRun.js";
+import { Results } from "../components/Results.js";
 import {
   AgentsSection,
   BriefSection,
@@ -125,8 +126,8 @@ export function Job() {
 
       <div className="mt-8 grid grid-cols-[minmax(0,1fr)] gap-8 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <div className="space-y-8">
-          <Results runs={runs.data?.runs ?? []} resultBase={`/app/jobs/${j.id}/results`} />
           <LiveRun jobId={j.id} />
+          <Results runs={runs.data?.runs ?? []} resultBase={`/app/jobs/${j.id}/results`} />
           <section>
             <h2 className="mb-2 text-xs text-muted">Decisions</h2>
             {decisions.isPending && <Loading />}
@@ -176,9 +177,10 @@ export function ApprovalCard({ pending }: { pending: PendingApproval }) {
           <p className="truncate font-voice italic text-muted">"{pending.reasoning}"</p>
         </div>
         <Button primary disabled={approve.isPending} onClick={() => approve.mutate(pending)}>
-          {approve.isPending ? "Sign in wallet…" : "Approve"}
+          {approve.isPending ? approveLabel(approve.step) : "Approve"}
         </Button>
       </div>
+      <FirstApprovalNote pending={pending} />
       <div className="mt-2">
         <ErrorLine error={approve.error} />
       </div>

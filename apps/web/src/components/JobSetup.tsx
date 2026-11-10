@@ -309,22 +309,6 @@ export function FinishSetup({ job }: { job: Job }) {
           }),
         );
       }
-      const approver = await readContract(wagmiConfig, {
-        address: config.vault,
-        abi: jobVaultAbi,
-        functionName: "isApprover",
-        args: [vaultJobId, owner],
-      });
-      if (!approver) {
-        await send("Let your wallet approve payments", () =>
-          write({
-            address: config.vault,
-            abi: jobVaultAbi,
-            functionName: "setApprover",
-            args: [vaultJobId, owner, true],
-          }),
-        );
-      }
       setStep("Waiting for Arc");
     },
     onSettled: () => {
@@ -347,8 +331,7 @@ export function FinishSetup({ job }: { job: Job }) {
       <p className="font-medium">Finish setting up this job</p>
       <p className="mt-1 text-sm text-muted">
         It&apos;s open in the vault but holds {job.deposited} of its {job.budget} USDC. Your wallet
-        will ask you to allow and make the deposit, then to approve payments, skipping anything
-        already done.
+        will ask you to allow the exact deposit and make it, skipping anything already done.
       </p>
       <Button primary className="mt-3" disabled={finish.isPending} onClick={() => finish.mutate()}>
         {finish.isPending ? `${step ?? "Working"}…` : "Finish setup"}
