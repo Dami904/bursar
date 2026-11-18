@@ -24,6 +24,13 @@ export const config = {
     (env.VITE_USDC_ADDRESS as `0x${string}` | undefined) ??
     "0x3600000000000000000000000000000000000000",
   walletConnectProjectId: env.VITE_WALLETCONNECT_PROJECT_ID,
+  /**
+   * EXPERIMENT, testnet only and off by default: set VITE_BATCH_SETUP=true to bundle job setup
+   * into one wallet confirmation on wallets that report support. A mainnet build ignores it, so
+   * real money never runs this path: some wallets' account upgrade breaks later approvals (see
+   * docs/spikes/batch-setup.md).
+   */
+  batchSetup: !mainnet && env.VITE_BATCH_SETUP === "true",
   explorer: mainnet ? "https://explorer.arc.io" : "https://explorer.testnet.arc.io",
   /**
    * The same console on the other network (testnet links to mainnet and back), e.g.

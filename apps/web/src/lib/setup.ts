@@ -9,7 +9,7 @@ import { parseUsdc } from "@bursar/money";
 export const MAX_SETUP_CONFIRMATIONS = 3;
 
 export interface SetupStep {
-  id: "create" | "vault" | "approve" | "fund" | "live";
+  id: "create" | "vault" | "approve" | "fund" | "batch" | "live";
   label: string;
   why: string;
   /** True when the wallet has to confirm this step. */
@@ -65,8 +65,34 @@ export function planSetup(input: {
   return steps;
 }
 
-export const confirmationsOf = (steps: readonly SetupStep[]) =>
-  steps.filter((s) => s.signs).length;
+/**
+ * The steps when the wallet can run a bundle all-or-nothing (the batching experiment): the job is
+ * opened, the exact deposit allowed and made, and the approver registered, in one confirmation.
+ */
+export function planBatchSetup(input: { budget: string }): SetupStep[] {
+  return [
+    {
+      id: "create",
+      label: "Create the job",
+      why: "Saved in Bursar. Nothing is signed.",
+      signs: false,
+    },
+    {
+      id: "batch",
+      label: `Open the job and deposit ${input.budget} USDC`,
+      why: "One confirmation does all of it or none of it: open the job, allow exactly this deposit, deposit it.",
+      signs: true,
+    },
+    {
+      id: "live",
+      label: "Waiting for Arc",
+      why: "Arc confirms it, usually in under a minute.",
+      signs: false,
+    },
+  ];
+}
+
+export const confirmationsOf = (steps: readonly SetupStep[]) => steps.filter((s) => s.signs).length;
 
 /**
  * Whether any payment on this job can need an owner's approval: only when the approval threshold

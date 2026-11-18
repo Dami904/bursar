@@ -1,17 +1,31 @@
 import { jobVaultAbi, usdcAbi } from "@bursar/payments/chain";
 import { parseUsdc } from "@bursar/money";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Plus, X } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 import type { Hex } from "viem";
 import { useConnection, useReadContract, useSwitchChain, useWriteContract } from "wagmi";
-import { readContract, waitForTransactionReceipt } from "wagmi/actions";
+import {
+  getCapabilities,
+  getPublicClient,
+  readContract,
+  sendCalls,
+  waitForCallsStatus,
+  waitForTransactionReceipt,
+} from "wagmi/actions";
 import { KeyReveal } from "../components/JobSetup.js";
 import { Button, Card, ErrorLine } from "../components/ui.js";
 import { api, type Job } from "../lib/api.js";
 import { config } from "../lib/config.js";
-import { planSetup } from "../lib/setup.js";
+import { shortAddress } from "../lib/format.js";
+import {
+  buildSetupBatch,
+  delegatedTo,
+  supportsAtomicBatch,
+  type OnChainParams,
+} from "../lib/batch.js";
+import { approvalsPossible, planBatchSetup, planSetup } from "../lib/setup.js";
 import { wagmiConfig } from "../lib/wagmi.js";
 
 interface Payee {
@@ -314,9 +328,23 @@ function FundStep({
   const [states, setStates] = useState<Record<string, StepState>>({});
   const [running, setRunning] = useState(false);
   const [agentKey, setAgentKey] = useState<string | null>(null);
+  /** The batching experiment: the owner chose separate confirmations instead. */
+  const [separate, setSeparate] = useState(false);
+  /** Set when the bundle left the owner's address upgraded: the delegate it now points at. */
+  const [upgradedTo, setUpgradedTo] = useState<Hex | null>(null);
 
   const vendors = draft.payees.filter((p) => p.kind === "ADDRESS");
   const amountNow = parseUsdc(draft.budget);
+  // Only asked when the experiment is on. A wallet that can't answer counts as "no".
+  const capabilities = useQuery({
+    queryKey: ["wallet-capabilities", connection.address],
+    queryFn: () => getCapabilities(wagmiConfig, { account: connection.address }),
+    enabled: config.batchSetup && connection.address !== undefined,
+    retry: false,
+    staleTime: 5 * 60_000,
+  });
+  const batching =
+    config.batchSetup && !separate && supportsAtomicBatch(capabilities.data, config.chain.id);
   // What the wallet already lets the vault take: if it covers this deposit, there's no allow step.
   const allowance = useReadContract({
     address: config.usdc,
@@ -327,7 +355,9 @@ function FundStep({
   });
   // Opening, allowing and depositing: three confirmations at most. Registering your wallet as an
   // approver and allowing vendor addresses happen later, when they're first needed.
-  const steps = planSetup({ budget: draft.budget, amount: amountNow, allowance: allowance.data });
+  const steps = batching
+    ? planBatchSetup({ budget: draft.budget })
+    : planSetup({ budget: draft.budget, amount: amountNow, allowance: allowance.data });
   const confirmations = steps.filter((s) => s.signs);
   const confirmed = confirmations.filter((s) => states[s.id] === "done").length;
 
@@ -389,56 +419,84 @@ function FundStep({
       const vaultJobId = j.onChain.vaultJobId as Hex;
       const amount = parseUsdc(draft.budget);
 
-      await once("vault", () =>
-        send(
-          write({
-            address: config.vault,
-            abi: jobVaultAbi,
-            functionName: "createJob",
-            args: [
-              vaultJobId,
-              {
-                agentWallet: j.onChain.agentWallet as Hex,
-                budget: amount,
-                perTxCap: parseUsdc(j.perTxCap),
-                approvalThreshold: parseUsdc(j.approvalThreshold),
-                windowCap: parseUsdc(j.windowCap),
-                window: BigInt(j.windowSeconds),
-                expiry: BigInt(Math.floor(new Date(j.expiresAt).getTime() / 1000)),
-              },
-            ],
-          }),
-        ),
-      );
-      // Read what the wallet allows right now, not what the page saw earlier: if it already covers
-      // this exact deposit, the allow step is skipped (and the wallet isn't asked).
-      await once("approve", async () => {
-        const allowed = await readContract(wagmiConfig, {
-          address: config.usdc,
-          abi: usdcAbi,
-          functionName: "allowance",
-          args: [owner, config.vault],
-        });
-        if (allowed >= amount) return;
-        await send(
-          write({
+      const params: OnChainParams = {
+        agentWallet: j.onChain.agentWallet as Hex,
+        budget: amount,
+        perTxCap: parseUsdc(j.perTxCap),
+        approvalThreshold: parseUsdc(j.approvalThreshold),
+        windowCap: parseUsdc(j.windowCap),
+        window: BigInt(j.windowSeconds),
+        expiry: BigInt(Math.floor(new Date(j.expiresAt).getTime() / 1000)),
+      };
+
+      if (batching) {
+        // EXPERIMENT (see lib/batch.ts): everything in one all-or-nothing confirmation.
+        await once("batch", async () => {
+          const allowed = await readContract(wagmiConfig, {
             address: config.usdc,
             abi: usdcAbi,
-            functionName: "approve",
-            args: [config.vault, amount],
-          }),
+            functionName: "allowance",
+            args: [owner, config.vault],
+          });
+          const calls = buildSetupBatch({
+            vault: config.vault,
+            usdc: config.usdc,
+            vaultJobId,
+            params,
+            allowance: allowed,
+            owner,
+            registerApprover: approvalsPossible(j),
+            vendors: vendors.map((v) => v.value as Hex),
+          });
+          const { id } = await sendCalls(wagmiConfig, { calls, forceAtomic: true });
+          const result = await waitForCallsStatus(wagmiConfig, { id, timeout: 180_000 });
+          if (result.status !== "success") throw new Error("The bundle didn't go through on Arc");
+          // Did the wallet upgrade the owner's address to do it? That changes how the vault checks
+          // this owner's approvals, so say so.
+          const code = await getPublicClient(wagmiConfig)?.getCode({ address: owner });
+          setUpgradedTo(delegatedTo(code));
+        });
+      } else {
+        await once("vault", () =>
+          send(
+            write({
+              address: config.vault,
+              abi: jobVaultAbi,
+              functionName: "createJob",
+              args: [vaultJobId, params],
+            }),
+          ),
         );
-      });
-      await once("fund", () =>
-        send(
-          write({
-            address: config.vault,
-            abi: jobVaultAbi,
-            functionName: "fund",
-            args: [vaultJobId, amount],
-          }),
-        ),
-      );
+        // Read what the wallet allows right now, not what the page saw earlier: if it already
+        // covers this exact deposit, the allow step is skipped (and the wallet isn't asked).
+        await once("approve", async () => {
+          const allowed = await readContract(wagmiConfig, {
+            address: config.usdc,
+            abi: usdcAbi,
+            functionName: "allowance",
+            args: [owner, config.vault],
+          });
+          if (allowed >= amount) return;
+          await send(
+            write({
+              address: config.usdc,
+              abi: usdcAbi,
+              functionName: "approve",
+              args: [config.vault, amount],
+            }),
+          );
+        });
+        await once("fund", () =>
+          send(
+            write({
+              address: config.vault,
+              abi: jobVaultAbi,
+              functionName: "fund",
+              args: [vaultJobId, amount],
+            }),
+          ),
+        );
+      }
       await once("live", async () => {
         for (let i = 0; i < 60; i += 1) {
           const fresh = await api<Job>(`/jobs/${j.id}`);
@@ -460,7 +518,14 @@ function FundStep({
   }
 
   if (agentKey !== null && job !== null) {
-    return <Done job={job} agentKey={agentKey} vendors={vendors.length} />;
+    return (
+      <Done
+        job={job}
+        agentKey={agentKey}
+        vendors={batching ? 0 : vendors.length}
+        upgradedTo={upgradedTo}
+      />
+    );
   }
 
   return (
@@ -521,8 +586,23 @@ function FundStep({
           );
         })}
       </ol>
+      {batching && (
+        <div className="rounded-xl border border-needs p-3 text-xs text-muted">
+          <p>
+            <span className="text-needs">Experiment.</span> Your wallet can bundle these into one
+            confirmation. Some wallets do that by upgrading your address, which can stop later
+            approvals from working. Approve one test payment on this job before relying on it.
+          </p>
+          {!running && job === null && (
+            <button className="mt-1 underline hover:text-ink" onClick={() => setSeparate(true)}>
+              Use separate confirmations instead
+            </button>
+          )}
+        </div>
+      )}
       <p className="text-xs text-muted">
-        Your wallet will ask you to confirm each step. Arc gas is paid in USDC.
+        Your wallet will ask you to confirm {batching ? "once" : "each step"}. Arc gas is paid in
+        USDC.
       </p>
       <div className="flex gap-2">
         <Button onClick={onBack} disabled={running || job !== null}>
@@ -540,16 +620,35 @@ function FundStep({
   );
 }
 
-function Done({ job, agentKey, vendors }: { job: Job; agentKey: string; vendors: number }) {
+function Done({
+  job,
+  agentKey,
+  vendors,
+  upgradedTo,
+}: {
+  job: Job;
+  agentKey: string;
+  vendors: number;
+  /** The batching experiment left the owner's address upgraded to this delegate. */
+  upgradedTo: Hex | null;
+}) {
   return (
     <div className="space-y-4">
       <p className="font-medium">{job.title} is live</p>
       <KeyReveal agentKey={agentKey} />
+      {upgradedTo !== null && (
+        <p className="rounded-xl border border-needs p-3 text-sm text-muted">
+          <span className="text-needs">Check before relying on this.</span> Your wallet upgraded
+          your address to run the bundle (it now points at {shortAddress(upgradedTo)}). The vault
+          checks approvals from an upgraded address differently. Approve one test payment on this
+          job first; if it fails, this wallet can't be used for approvals yet.
+        </p>
+      )}
       {vendors > 0 && (
         <p className="text-sm text-muted">
-          {vendors === 1 ? "Your vendor address needs" : `Your ${vendors} vendor addresses need`} one
-          confirmation each before the job can pay {vendors === 1 ? "it" : "them"}. Open the job, and
-          under Who can be paid, choose Allow in vault.
+          {vendors === 1 ? "Your vendor address needs" : `Your ${vendors} vendor addresses need`}{" "}
+          one confirmation each before the job can pay {vendors === 1 ? "it" : "them"}. Open the
+          job, and under Who can be paid, choose Allow in vault.
         </p>
       )}
       <Link to={`/app/jobs/${job.id}`}>

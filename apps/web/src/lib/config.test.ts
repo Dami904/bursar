@@ -41,6 +41,27 @@ describe("which Arc network the console is built for", { timeout: 30_000 }, () =
   });
 });
 
+describe("the one-confirmation setup experiment", { timeout: 30_000 }, () => {
+  it("is off unless the build asks for it", async () => {
+    expect((await load({})).batchSetup).toBe(false);
+    expect((await load({ VITE_BATCH_SETUP: "false" })).batchSetup).toBe(false);
+  });
+
+  it("is on for a testnet build that asks for it", async () => {
+    expect((await load({ VITE_BATCH_SETUP: "true" })).batchSetup).toBe(true);
+  });
+
+  it("stays off on mainnet even when asked: real money never runs it", async () => {
+    const config = await load({
+      VITE_ARC_CHAIN_ID: "5042",
+      VITE_JOB_VAULT_ADDRESS: "0x1111111111111111111111111111111111111111",
+      VITE_BATCH_SETUP: "true",
+    });
+    expect(config.mainnet).toBe(true);
+    expect(config.batchSetup).toBe(false);
+  });
+});
+
 describe("where the live demo links go", { timeout: 30_000 }, () => {
   it("stay on the site on testnet, which has its own public demo", async () => {
     const { demoLink } = await loadModule({});

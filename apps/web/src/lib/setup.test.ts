@@ -5,6 +5,7 @@ import {
   approvalsPossible,
   confirmationsOf,
   MAX_SETUP_CONFIRMATIONS,
+  planBatchSetup,
   planSetup,
 } from "./setup.js";
 
@@ -23,9 +24,7 @@ describe("job setup confirmations", () => {
   it("is two when the wallet already allows this exact deposit or more", () => {
     expect(confirmationsOf(plan("5.00", parseUsdc("5.00")))).toBe(2);
     expect(confirmationsOf(plan("5.00", parseUsdc("50.00")))).toBe(2);
-    expect(
-      plan("5.00", parseUsdc("5.00")).some((s) => s.id === "approve"),
-    ).toBe(false);
+    expect(plan("5.00", parseUsdc("5.00")).some((s) => s.id === "approve")).toBe(false);
   });
 
   it("still asks to allow when the existing allowance is short by even a micro-USDC", () => {
@@ -48,6 +47,15 @@ describe("job setup confirmations", () => {
     expect(ids.every((id) => ["create", "vault", "approve", "fund", "live"].includes(id))).toBe(
       true,
     );
+  });
+});
+
+describe("bundled setup (experiment)", () => {
+  it("asks for a single confirmation, and still names the exact deposit", () => {
+    const steps = planBatchSetup({ budget: "5.00" });
+    expect(confirmationsOf(steps)).toBe(1);
+    expect(steps.find((s) => s.signs)?.label).toContain("5.00 USDC");
+    expect(steps.map((s) => s.id)).toEqual(["create", "batch", "live"]);
   });
 });
 
