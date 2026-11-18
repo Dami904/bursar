@@ -127,9 +127,14 @@ export async function startWorker(env: WorkerEnv): Promise<RunningWorker | null>
               log: (event, fields) => log.info(`operator: ${event}`, fields),
               onEvent: (e) => {
                 saving = saving.then(() =>
-                  addRunEvent(db, { jobId, runKey, depth: e.depth, kind: e.kind, text: e.text }).catch(
-                    (error: unknown) =>
-                      log.warn("couldn't save a progress line", { jobId, error: String(error) }),
+                  addRunEvent(db, {
+                    jobId,
+                    runKey,
+                    depth: e.depth,
+                    kind: e.kind,
+                    text: e.text,
+                  }).catch((error: unknown) =>
+                    log.warn("couldn't save a progress line", { jobId, error: String(error) }),
                   ),
                 );
               },

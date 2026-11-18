@@ -50,7 +50,10 @@ describe("the live run panel", () => {
   });
 
   it("after the run, shows the last few lines and offers the rest", () => {
-    const lines: [string, string][] = Array.from({ length: 9 }, (_, i) => ["step", `Step ${i + 1}`]);
+    const lines: [string, string][] = Array.from({ length: 9 }, (_, i) => [
+      "step",
+      `Step ${i + 1}`,
+    ]);
     const html = renderToStaticMarkup(<LiveRunView live={run(false, lines)} />);
     expect(html).toContain("Last run");
     expect(html).toContain("Show 3 earlier steps");
